@@ -33,6 +33,8 @@ pub struct QuoteRecord {
     pub status: String,
     pub updated_at: OffsetDateTime,
     pub evm_deposit_derivation_path: Option<String>,
+    pub miden_deposit_account_id: Option<String>,
+    pub miden_deposit_seed_hex: Option<String>,
     pub evm_deposit_tx_hashes: Vec<String>,
     pub evm_release_tx_hashes: Vec<String>,
     pub miden_mint_tx_ids: Vec<String>,
@@ -52,6 +54,30 @@ pub struct EvmTrackedQuote {
     pub amount_in: String,
     pub status: String,
     pub evm_deposit_derivation_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MidenTrackedQuote {
+    pub correlation_id: Uuid,
+    pub deposit_address: String,
+    pub origin_asset: String,
+    pub destination_asset: String,
+    pub recipient: String,
+    pub amount_in: String,
+    pub status: String,
+    pub miden_deposit_account_id: String,
+    pub miden_deposit_seed_hex: String,
+    pub evm_release_tx_hashes: Vec<String>,
+    pub miden_consume_tx_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MidenBootstrapRecord {
+    pub solver_account_id: String,
+    pub eth_faucet_account_id: String,
+    pub usdc_faucet_account_id: String,
+    pub usdt_faucet_account_id: String,
+    pub btc_faucet_account_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +143,11 @@ pub trait StateStore: Send + Sync {
         memo: Option<&str>,
     ) -> Result<Option<QuoteRecord>, StateStoreError>;
 
+    async fn get_quote_by_correlation_id(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Option<QuoteRecord>, StateStoreError>;
+
     async fn record_event(
         &self,
         correlation_id: Uuid,
@@ -146,7 +177,23 @@ pub trait StateStore: Send + Sync {
         derivation_path: &str,
     ) -> Result<(), StateStoreError>;
 
+    async fn set_miden_deposit_account(
+        &self,
+        correlation_id: Uuid,
+        account_id: &str,
+        seed_hex: &str,
+    ) -> Result<(), StateStoreError>;
+
     async fn list_evm_tracked_quotes(&self) -> Result<Vec<EvmTrackedQuote>, StateStoreError>;
+
+    async fn list_miden_tracked_quotes(&self) -> Result<Vec<MidenTrackedQuote>, StateStoreError>;
+
+    async fn get_miden_bootstrap(&self) -> Result<Option<MidenBootstrapRecord>, StateStoreError>;
+
+    async fn upsert_miden_bootstrap(
+        &self,
+        record: &MidenBootstrapRecord,
+    ) -> Result<(), StateStoreError>;
 
     async fn ping(&self) -> Result<(), StateStoreError>;
 }
@@ -241,6 +288,8 @@ impl StateStore for PostgresStateStore {
                 q.status,
                 q.updated_at,
                 c.evm_deposit_derivation_path,
+                c.miden_deposit_account_id,
+                c.miden_deposit_seed_hex,
                 c.evm_deposit_tx_hashes,
                 c.evm_release_tx_hashes,
                 c.miden_mint_tx_ids,
@@ -260,6 +309,43 @@ impl StateStore for PostgresStateStore {
         )
         .bind(address)
         .bind(memo)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(map_quote_record).transpose()
+    }
+
+    async fn get_quote_by_correlation_id(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Option<QuoteRecord>, StateStoreError> {
+        let row = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT
+                q.correlation_id,
+                q.quote_request_json,
+                q.quote_response_json,
+                q.status,
+                q.updated_at,
+                c.evm_deposit_derivation_path,
+                c.miden_deposit_account_id,
+                c.miden_deposit_seed_hex,
+                c.evm_deposit_tx_hashes,
+                c.evm_release_tx_hashes,
+                c.miden_mint_tx_ids,
+                c.miden_consume_tx_ids,
+                c.evm_refund_tx_hashes,
+                c.miden_refund_tx_ids,
+                c.intent_hashes,
+                c.near_tx_hashes,
+                c.idempotency_keys
+            FROM quotes q
+            INNER JOIN chain_artifacts c ON c.correlation_id = q.correlation_id
+            WHERE q.correlation_id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(correlation_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -399,6 +485,29 @@ impl StateStore for PostgresStateStore {
         Ok(())
     }
 
+    async fn set_miden_deposit_account(
+        &self,
+        correlation_id: Uuid,
+        account_id: &str,
+        seed_hex: &str,
+    ) -> Result<(), StateStoreError> {
+        query::<sqlx_postgres::Postgres>(
+            r#"
+            UPDATE chain_artifacts
+            SET miden_deposit_account_id = $2,
+                miden_deposit_seed_hex = $3,
+                updated_at = NOW()
+            WHERE correlation_id = $1
+            "#,
+        )
+        .bind(correlation_id)
+        .bind(account_id)
+        .bind(seed_hex)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn list_evm_tracked_quotes(&self) -> Result<Vec<EvmTrackedQuote>, StateStoreError> {
         let rows = query::<sqlx_postgres::Postgres>(
             r#"
@@ -436,6 +545,116 @@ impl StateStore for PostgresStateStore {
             .collect()
     }
 
+    async fn list_miden_tracked_quotes(&self) -> Result<Vec<MidenTrackedQuote>, StateStoreError> {
+        let rows = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT
+                q.correlation_id,
+                q.deposit_address,
+                q.quote_request_json,
+                q.quote_response_json,
+                q.status,
+                c.miden_deposit_account_id,
+                c.miden_deposit_seed_hex,
+                c.evm_release_tx_hashes,
+                c.miden_consume_tx_ids
+            FROM quotes q
+            INNER JOIN chain_artifacts c ON c.correlation_id = q.correlation_id
+            WHERE q.status IN ('PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING')
+              AND c.miden_deposit_account_id IS NOT NULL
+              AND c.miden_deposit_seed_hex IS NOT NULL
+            ORDER BY q.created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let request: QuoteRequest =
+                    serde_json::from_value(row.try_get("quote_request_json")?)?;
+                let response: QuoteResponse =
+                    serde_json::from_value(row.try_get("quote_response_json")?)?;
+                Ok(MidenTrackedQuote {
+                    correlation_id: row.try_get("correlation_id")?,
+                    deposit_address: row.try_get("deposit_address")?,
+                    origin_asset: request.origin_asset,
+                    destination_asset: request.destination_asset,
+                    recipient: request.recipient,
+                    amount_in: response.quote.amount_in,
+                    status: row.try_get("status")?,
+                    miden_deposit_account_id: row.try_get("miden_deposit_account_id")?,
+                    miden_deposit_seed_hex: row.try_get("miden_deposit_seed_hex")?,
+                    evm_release_tx_hashes: jsonb_array_to_vec(&row, "evm_release_tx_hashes")?,
+                    miden_consume_tx_ids: jsonb_array_to_vec(&row, "miden_consume_tx_ids")?,
+                })
+            })
+            .collect()
+    }
+
+    async fn get_miden_bootstrap(&self) -> Result<Option<MidenBootstrapRecord>, StateStoreError> {
+        let row = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT
+                solver_account_id,
+                eth_faucet_account_id,
+                usdc_faucet_account_id,
+                usdt_faucet_account_id,
+                btc_faucet_account_id
+            FROM miden_bootstrap
+            WHERE singleton_key = TRUE
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(MidenBootstrapRecord {
+                solver_account_id: row.try_get("solver_account_id")?,
+                eth_faucet_account_id: row.try_get("eth_faucet_account_id")?,
+                usdc_faucet_account_id: row.try_get("usdc_faucet_account_id")?,
+                usdt_faucet_account_id: row.try_get("usdt_faucet_account_id")?,
+                btc_faucet_account_id: row.try_get("btc_faucet_account_id")?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn upsert_miden_bootstrap(
+        &self,
+        record: &MidenBootstrapRecord,
+    ) -> Result<(), StateStoreError> {
+        query::<sqlx_postgres::Postgres>(
+            r#"
+            INSERT INTO miden_bootstrap (
+                singleton_key,
+                solver_account_id,
+                eth_faucet_account_id,
+                usdc_faucet_account_id,
+                usdt_faucet_account_id,
+                btc_faucet_account_id
+            )
+            VALUES (TRUE, $1, $2, $3, $4, $5)
+            ON CONFLICT (singleton_key) DO UPDATE
+            SET solver_account_id = EXCLUDED.solver_account_id,
+                eth_faucet_account_id = EXCLUDED.eth_faucet_account_id,
+                usdc_faucet_account_id = EXCLUDED.usdc_faucet_account_id,
+                usdt_faucet_account_id = EXCLUDED.usdt_faucet_account_id,
+                btc_faucet_account_id = EXCLUDED.btc_faucet_account_id,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&record.solver_account_id)
+        .bind(&record.eth_faucet_account_id)
+        .bind(&record.usdc_faucet_account_id)
+        .bind(&record.usdt_faucet_account_id)
+        .bind(&record.btc_faucet_account_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn ping(&self) -> Result<(), StateStoreError> {
         query::<sqlx_postgres::Postgres>("SELECT 1")
             .execute(&self.pool)
@@ -454,6 +673,8 @@ fn map_quote_record(row: PgRow) -> Result<QuoteRecord, StateStoreError> {
         status: row.try_get("status")?,
         updated_at: row.try_get("updated_at")?,
         evm_deposit_derivation_path: row.try_get("evm_deposit_derivation_path")?,
+        miden_deposit_account_id: row.try_get("miden_deposit_account_id")?,
+        miden_deposit_seed_hex: row.try_get("miden_deposit_seed_hex")?,
         evm_deposit_tx_hashes: jsonb_array_to_vec(&row, "evm_deposit_tx_hashes")?,
         evm_release_tx_hashes: jsonb_array_to_vec(&row, "evm_release_tx_hashes")?,
         miden_mint_tx_ids: jsonb_array_to_vec(&row, "miden_mint_tx_ids")?,

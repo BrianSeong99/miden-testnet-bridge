@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
 };
 use chains::evm::EvmClient;
-use chains::miden::MidenHealthCheck;
+use chains::miden::{MidenClient, MidenHealthCheck};
 use time::OffsetDateTime;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -22,6 +22,8 @@ pub struct AppState {
     pub store: DynStateStore,
     pub evm: Option<Arc<EvmClient>>,
     pub miden: Option<Arc<dyn MidenHealthCheck>>,
+    pub miden_client: Option<Arc<MidenClient>>,
+    pub miden_master_seed: Option<[u8; 32]>,
 }
 
 impl AppState {
@@ -30,6 +32,8 @@ impl AppState {
             store,
             evm: None,
             miden: None,
+            miden_client: None,
+            miden_master_seed: None,
         }
     }
 
@@ -38,18 +42,23 @@ impl AppState {
             store,
             evm: Some(evm),
             miden: None,
+            miden_client: None,
+            miden_master_seed: None,
         }
     }
 
     pub fn with_clients(
         store: DynStateStore,
         evm: Arc<EvmClient>,
-        miden: Arc<dyn MidenHealthCheck>,
+        miden: Arc<MidenClient>,
+        miden_master_seed: [u8; 32],
     ) -> Self {
         Self {
             store,
             evm: Some(evm),
-            miden: Some(miden),
+            miden: Some(miden.clone()),
+            miden_client: Some(miden),
+            miden_master_seed: Some(miden_master_seed),
         }
     }
 }

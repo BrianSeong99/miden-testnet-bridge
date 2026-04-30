@@ -11,6 +11,8 @@ use miden_testnet_bridge::{
     chains::{
         evm::{EvmClient, EvmConfig, token_addresses_path_from_env},
         miden::MidenClient,
+        miden_bootstrap::bootstrap_miden,
+        miden_outbound::poll_outbound_deposits,
     },
     core::state::{PostgresStateStore, connect_pool},
     init_tracing,
@@ -23,6 +25,7 @@ struct Config {
     database_url: String,
     miden_rpc_url: String,
     miden_store_dir: PathBuf,
+    miden_master_seed_hex: String,
     evm_rpc_url: String,
     master_mnemonic: String,
     solver_private_key: String,
@@ -54,6 +57,9 @@ impl Config {
                 env::var("MIDEN_STORE_DIR")
                     .unwrap_or_else(|_| "./.miden-store".to_owned()),
             ),
+            miden_master_seed_hex: env::var("MIDEN_MASTER_SEED_HEX").unwrap_or_else(|_| {
+                "0101010101010101010101010101010101010101010101010101010101010101".to_owned()
+            }),
             evm_rpc_url: env::var("EVM_RPC_URL")
                 .unwrap_or_else(|_| "http://host.docker.internal:8545".to_owned()),
             master_mnemonic: env::var("MASTER_MNEMONIC")
@@ -84,6 +90,7 @@ impl Config {
         for (name, value) in [
             ("DATABASE_URL", self.database_url.as_str()),
             ("MIDEN_RPC_URL", self.miden_rpc_url.as_str()),
+            ("MIDEN_MASTER_SEED_HEX", self.miden_master_seed_hex.as_str()),
             ("EVM_RPC_URL", self.evm_rpc_url.as_str()),
             ("MASTER_MNEMONIC", self.master_mnemonic.as_str()),
             ("SOLVER_PRIVATE_KEY", self.solver_private_key.as_str()),
@@ -95,6 +102,13 @@ impl Config {
 
         Ok(())
     }
+}
+
+fn parse_master_seed_hex(seed_hex: &str) -> Result<[u8; 32]> {
+    let bytes = alloy::hex::decode(seed_hex).context("MIDEN_MASTER_SEED_HEX must be valid hex")?;
+    bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("MIDEN_MASTER_SEED_HEX must decode into 32 bytes"))
 }
 
 #[tokio::main]
@@ -114,20 +128,42 @@ async fn main() -> Result<()> {
         .context("failed to run migrations")?;
 
     let store = arc_store(PostgresStateStore::new(pool));
+    let miden_master_seed = parse_master_seed_hex(&config.miden_master_seed_hex)?;
     let miden = Arc::new(MidenClient::new(&config.miden_rpc_url, &config.miden_store_dir).await?);
-    let evm = Arc::new(EvmClient::new(
-        store.clone(),
-        EvmConfig {
-            rpc_url: config.evm_rpc_url.clone(),
-            master_mnemonic: config.master_mnemonic.clone(),
-            solver_private_key: config.solver_private_key.clone(),
-            token_addresses_path: token_addresses_path_from_env(),
-            chain_id: config.evm_chain_id,
-        },
-    )?);
+    bootstrap_miden(miden.as_ref(), store.clone(), &miden_master_seed).await?;
+    let evm = Arc::new(
+        EvmClient::new(
+            store.clone(),
+            EvmConfig {
+                rpc_url: config.evm_rpc_url.clone(),
+                master_mnemonic: config.master_mnemonic.clone(),
+                solver_private_key: config.solver_private_key.clone(),
+                token_addresses_path: token_addresses_path_from_env(),
+                chain_id: config.evm_chain_id,
+            },
+        )?
+        .with_miden_client(miden.clone()),
+    );
     tokio::spawn(evm.clone().watch_deposits());
+    let outbound_miden = miden.clone();
+    let outbound_store = store.clone();
+    let outbound_evm = evm.clone();
+    tokio::task::spawn_blocking(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("outbound poller runtime");
+        runtime
+            .block_on(poll_outbound_deposits(
+                outbound_miden,
+                outbound_store,
+                outbound_evm,
+                miden_master_seed,
+            ))
+            .expect("outbound poller");
+    });
 
-    let state = AppState::with_clients(store, evm, miden);
+    let state = AppState::with_clients(store, evm, miden, miden_master_seed);
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await

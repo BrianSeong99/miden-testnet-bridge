@@ -30,7 +30,13 @@ use tracing::{error, warn};
 use url::Url;
 use uuid::Uuid;
 
-use crate::core::state::{DynStateStore, EvmTrackedQuote, TxHashColumn};
+use crate::{
+    chains::{
+        miden::MidenClient, miden_bootstrap::bootstrap_state_from_record,
+        miden_inbound::mint_quote_to_user,
+    },
+    core::state::{DynStateStore, EvmTrackedQuote, TxHashColumn},
+};
 
 sol! {
     event Transfer(address indexed from, address indexed to, uint256 value);
@@ -54,6 +60,7 @@ pub struct EvmClient {
     store: DynStateStore,
     master_mnemonic: String,
     token_contracts: TokenContracts,
+    miden_client: Option<Arc<MidenClient>>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,7 +100,13 @@ impl EvmClient {
             store,
             master_mnemonic: config.master_mnemonic,
             token_contracts: TokenContracts::load(&config.token_addresses_path)?,
+            miden_client: None,
         })
+    }
+
+    pub fn with_miden_client(mut self, miden_client: Arc<MidenClient>) -> Self {
+        self.miden_client = Some(miden_client);
+        self
     }
 
     pub async fn derive_deposit_address(&self, correlation_id: Uuid) -> Result<(Address, String)> {
@@ -169,6 +182,20 @@ impl EvmClient {
 
     pub fn token_address(&self, asset_id: &str) -> Option<Address> {
         self.token_contracts.by_asset_id.get(asset_id).copied()
+    }
+
+    pub async fn miden_faucet_account_id(
+        &self,
+        asset_id: &str,
+    ) -> Result<miden_client::account::AccountId> {
+        let bootstrap = self
+            .store
+            .get_miden_bootstrap()
+            .await
+            .context("failed to load Miden bootstrap state")?
+            .ok_or_else(|| anyhow!("Miden bootstrap state is missing"))?;
+        let state = bootstrap_state_from_record(&bootstrap)?;
+        state.faucet_id_for_asset(asset_id)
     }
 
     pub async fn record_detected_deposit(
@@ -442,32 +469,43 @@ impl EvmClient {
             return Ok(());
         }
 
-        let mint_tx_id = self
-            .mock_miden_mint(correlation_id)
+        self.mock_miden_mint(correlation_id)
             .await
-            .context("failed to complete Miden mint stub")?;
-        self.store
-            .append_tx_hash(correlation_id, TxHashColumn::MidenMintTxIds, &mint_tx_id)
-            .await
-            .context("failed to persist Miden mint stub tx id")?;
-        self.store
-            .record_event(
-                correlation_id,
-                Some("PROCESSING"),
-                "SUCCESS",
-                "MIDEN_MINT_CONFIRMED",
-                None,
-                Some(json!({ "midenMintTxId": mint_tx_id })),
-            )
-            .await
-            .context("failed to record success transition")?;
+            .context("failed to complete Miden mint flow")?;
         Ok(())
     }
 
     async fn mock_miden_mint(&self, correlation_id: Uuid) -> Result<String> {
+        if let Some(miden_client) = self.miden_client.as_ref() {
+            let miden_client = miden_client.clone();
+            let store = self.store.clone();
+            return tokio::task::spawn_blocking(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .context("failed to build tokio runtime for Miden mint")?;
+                runtime.block_on(async move {
+                    let bootstrap = store
+                        .get_miden_bootstrap()
+                        .await
+                        .context("failed to load Miden bootstrap state")?
+                        .ok_or_else(|| anyhow!("Miden bootstrap state is missing"))?;
+                    let bootstrap = bootstrap_state_from_record(&bootstrap)?;
+                    mint_quote_to_user(
+                        miden_client.as_ref(),
+                        store.clone(),
+                        &bootstrap,
+                        correlation_id,
+                    )
+                    .await
+                })
+            })
+            .await
+            .context("failed to join blocking Miden mint task")?;
+        }
+
         let mint_future: Pin<Box<dyn Future<Output = Result<String>> + Send>> =
             Box::pin(async move { Ok(format!("stub-miden-mint-{correlation_id}")) });
-        // TODO: Replace this stub with the real Miden mint flow in PR #7.
         mint_future.await
     }
 }
