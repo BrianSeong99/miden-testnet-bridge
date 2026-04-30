@@ -1,21 +1,13 @@
-use std::{collections::HashMap, env, net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, path::Path};
 
 use anyhow::{Context, Result};
-use axum::{
-    Router,
-    routing::{get, post},
+use miden_testnet_bridge::{
+    AppState, LogFormat, app, arc_store,
+    core::state::{PostgresStateStore, connect_pool},
+    init_tracing,
 };
-use time::OffsetDateTime;
-use tokio::sync::RwLock;
+use sqlx::migrate::Migrator;
 use tracing::info;
-use tracing_subscriber::{EnvFilter, fmt};
-
-pub mod api;
-pub mod types;
-
-use crate::types::{QuoteResponse, SubmitDepositTxRequest};
-
-type QuoteKey = (String, Option<String>);
 
 #[derive(Clone, Debug)]
 struct Config {
@@ -27,18 +19,6 @@ struct Config {
     http_port: u16,
     rust_log: String,
     log_format: LogFormat,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LogFormat {
-    Json,
-    Pretty,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct AppState {
-    pub(crate) quotes: Arc<RwLock<HashMap<QuoteKey, QuoteResponse>>>,
-    pub(crate) deposit_submissions: Arc<RwLock<Vec<SubmitDepositTxRequest>>>,
 }
 
 impl Config {
@@ -99,9 +79,20 @@ impl Config {
 async fn main() -> Result<()> {
     let config = Config::from_env()?;
     config.validate()?;
-    init_tracing(&config);
+    init_tracing(&config.rust_log, config.log_format);
 
-    let app = app(AppState::default());
+    let pool = connect_pool(&config.database_url, 10)
+        .await
+        .context("failed to connect to postgres")?;
+    Migrator::new(Path::new("migrations"))
+        .await
+        .context("failed to load migrations")?
+        .run(&pool)
+        .await
+        .context("failed to run migrations")?;
+
+    let state = AppState::new(arc_store(PostgresStateStore::new(pool)));
+    let app = app(state);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await
         .context("failed to bind HTTP listener")?;
@@ -111,38 +102,4 @@ async fn main() -> Result<()> {
     axum::serve(listener, app)
         .await
         .context("HTTP server stopped unexpectedly")
-}
-
-fn init_tracing(config: &Config) {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(config.rust_log.clone()));
-
-    let builder = fmt().with_env_filter(env_filter);
-    match config.log_format {
-        LogFormat::Json => builder.json().init(),
-        LogFormat::Pretty => builder.pretty().init(),
-    }
-}
-
-pub(crate) fn app(state: AppState) -> Router {
-    Router::new()
-        .route("/v0/quote", post(api::quote::quote))
-        .route("/v0/status", get(api::status::status))
-        .route("/v0/tokens", get(api::tokens::tokens))
-        .route(
-            "/v0/deposit/submit",
-            post(api::deposit_submit::submit_deposit),
-        )
-        .route(
-            "/v0/any-input/withdrawals",
-            get(api::withdrawals::withdrawals),
-        )
-        .route("/healthz", get(api::healthz::healthz))
-        .with_state(state)
-}
-
-pub(crate) fn now_iso8601() -> String {
-    OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .expect("RFC3339 formatting should succeed")
 }

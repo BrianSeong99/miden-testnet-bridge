@@ -38,11 +38,11 @@ mod tests {
     use serde_json::Value;
     use tower::ServiceExt;
 
-    use crate::{AppState, app};
+    use crate::{AppState, app, test_support::memory_state};
 
     #[tokio::test]
     async fn returns_object_shape() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let response = app
             .oneshot(
                 Request::get("/v0/any-input/withdrawals")

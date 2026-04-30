@@ -60,12 +60,12 @@ pub(crate) async fn quote(
         },
     };
 
-    if let Some(deposit_address) = deposit_address {
+    if deposit_address.is_some() {
         state
-            .quotes
-            .write()
+            .store
+            .insert_quote(&response, &request)
             .await
-            .insert((deposit_address, None), response.clone());
+            .map_err(|error| ApiError::internal(error.to_string()))?;
     }
 
     Ok(Json(response))
@@ -80,7 +80,7 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use crate::{AppState, app, types::QuoteResponse};
+    use crate::{AppState, app, test_support::memory_state, types::QuoteResponse};
 
     fn sample_quote_request() -> Value {
         json!({
@@ -110,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn happy_path_returns_quote_response() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let response = app
             .oneshot(
                 Request::post("/v0/quote")
@@ -134,7 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn custom_recipient_msg_returns_bad_request() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let payload = with_override(
             sample_quote_request(),
             "customRecipientMsg",
@@ -155,7 +155,7 @@ mod tests {
 
     #[tokio::test]
     async fn memo_deposit_mode_returns_bad_request() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let payload = with_override(
             sample_quote_request(),
             "depositMode",
@@ -176,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn dry_quote_omits_deposit_fields() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let payload = with_override(sample_quote_request(), "dry", Value::Bool(true));
         let response = app
             .oneshot(
@@ -202,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn bearer_header_is_accepted() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let response = app
             .oneshot(
                 Request::post("/v0/quote")
@@ -215,5 +215,39 @@ mod tests {
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn persisted_quote_calls_state_store() {
+        let store = memory_state();
+        let app = app(AppState::new(store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post("/v0/quote")
+                    .header("content-type", "application/json")
+                    .body(Body::from(sample_quote_request().to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let quote: QuoteResponse = serde_json::from_slice(&body).expect("quote response");
+        let stored = store
+            .get_quote_by_deposit(
+                quote
+                    .quote
+                    .deposit_address
+                    .as_deref()
+                    .expect("deposit address"),
+                None,
+            )
+            .await
+            .expect("state query");
+
+        assert!(stored.is_some());
     }
 }

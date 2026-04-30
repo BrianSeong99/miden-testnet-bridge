@@ -91,11 +91,11 @@ mod tests {
     };
     use tower::ServiceExt;
 
-    use crate::{AppState, app, types::TokenResponse};
+    use crate::{AppState, app, test_support::memory_state, types::TokenResponse};
 
     #[tokio::test]
     async fn returns_supported_tokens() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let response = app
             .oneshot(
                 Request::get("/v0/tokens")
