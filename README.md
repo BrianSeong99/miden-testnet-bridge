@@ -52,6 +52,15 @@ Run the local Docker gate before opening or updating a PR:
 bash scripts/ci.sh
 ```
 
+Run the end-to-end suite separately against a real local compose stack:
+
+```bash
+make genesis
+make e2e
+```
+
+The E2E tests run serially by design. Expect the first run to take 10+ minutes if Docker needs to build `miden-node` and bridge images.
+
 ## Miden Node Bootstrap
 
 `make genesis` runs `miden-node bundled bootstrap` inside Docker and writes the chain state into named Docker volumes. The bridge container does not report healthy until both Postgres and the local Miden RPC are reachable.

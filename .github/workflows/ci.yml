@@ -5,6 +5,24 @@ on:
   pull_request:
 
 jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            e2e:
+              - 'tests/e2e/**'
+              - 'compose.yaml'
+              - 'Dockerfile.miden-node'
+              - 'scripts/**'
+              - 'src/chains/**'
+
   rust:
     runs-on: ubuntu-latest
 
@@ -21,3 +39,33 @@ jobs:
         run: cargo build --locked
       - name: cargo test
         run: cargo test --locked
+
+  e2e:
+    if: github.event_name == 'pull_request' && needs.changes.outputs.e2e == 'true'
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Bootstrap genesis
+        run: make genesis
+      - name: Start compose stack
+        run: docker compose up -d --wait
+      - name: Run E2E suite
+        run: make e2e
+        env:
+          RUN_E2E: "1"
+      - name: Capture bridge logs
+        if: failure()
+        run: docker compose logs bridge > bridge.log
+      - name: Upload bridge logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-log
+          path: bridge.log
+      - name: Stop compose stack
+        if: always()
+        run: docker compose down --volumes

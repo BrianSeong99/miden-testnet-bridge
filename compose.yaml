@@ -45,6 +45,8 @@ services:
         MIDEN_NODE_REF: v0.14.10
     image: miden-node-local:v0.14.10
     command: ["/bin/bash", "/scripts/miden_node_start.sh"]
+    ports:
+      - "57291:57291"
     volumes:
       - miden-node-data:/var/lib/miden/data
       - miden-node-accounts:/var/lib/miden/accounts
@@ -73,27 +75,15 @@ services:
 
   anvil:
     image: ghcr.io/foundry-rs/foundry:latest
-    command:
-      - anvil
-      - --host
-      - 0.0.0.0
-      - --chain-id
-      - "271828"
-      - --block-time
-      - "1"
-      - --state
-      - /state/anvil.json
-      - --mnemonic
-      - "test test test test test test test test test test test junk"
-      - --balance
-      - "100000"
+    entrypoint: ["/bin/sh", "/bootstrap/anvil_start.sh"]
     ports:
       - "8545:8545"
     volumes:
       - anvil-state:/state
+      - ./scripts/anvil_start.sh:/bootstrap/anvil_start.sh:ro
       - ./scripts/anvil_bootstrap.sh:/bootstrap/anvil_bootstrap.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "cast rpc eth_blockNumber --rpc-url http://localhost:8545 | grep -Eq '^0x[0-9a-fA-F]+$'"]
+      test: ["CMD-SHELL", "cast rpc eth_blockNumber --rpc-url http://localhost:8545 | tr -d '\"' | grep -Eq '^0x[0-9a-fA-F]+$'"]
       interval: 5s
       timeout: 5s
       retries: 12
