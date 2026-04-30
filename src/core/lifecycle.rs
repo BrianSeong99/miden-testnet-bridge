@@ -120,6 +120,7 @@ impl DefaultLifecycle {
         record: &QuoteRecord,
         event: &LifecycleEvent,
         to_status: &str,
+        reason_override: Option<&str>,
     ) -> Result<()> {
         if let Some((column, hash)) = tx_hash_to_append(record, event) {
             let already_present = match column {
@@ -166,7 +167,7 @@ impl DefaultLifecycle {
                 Some(&record.status),
                 to_status,
                 event_kind(event),
-                event_reason(event),
+                reason_override.or_else(|| event_reason(event)),
                 Some(event_metadata(event)),
             )
             .await
@@ -186,7 +187,7 @@ impl DefaultLifecycle {
     }
 
     async fn refund_record(&self, record: &QuoteRecord) -> Result<()> {
-        let amount = refund_amount(record)?;
+        let amount = refund_amount(self.state.as_ref(), record).await?;
         if is_evm_asset_id(&record.quote_request.origin_asset) {
             if record
                 .quote_response
@@ -263,6 +264,43 @@ impl DefaultLifecycle {
         .await
         .map(|_| ())
     }
+
+    async fn deadline_expired_reason(
+        &self,
+        record: &QuoteRecord,
+        to_status: &str,
+    ) -> Result<Option<&'static str>> {
+        if to_status == "REFUNDED"
+            && !has_confirmed_deposit_amount(self.state.as_ref(), record.correlation_id).await?
+        {
+            return Ok(Some("deadline_expired_no_deposit"));
+        }
+        Ok(None)
+    }
+
+    async fn target_status_for_deadline_expired(
+        &self,
+        record: &QuoteRecord,
+    ) -> Result<Option<&'static str>> {
+        match record.status.as_str() {
+            "PROCESSING" => Ok(None),
+            "INCOMPLETE_DEPOSIT" => Ok(Some("INCOMPLETE_DEPOSIT")),
+            "PENDING_DEPOSIT" | "KNOWN_DEPOSIT_TX" => Ok(Some("REFUNDED")),
+            status if is_terminal_status(status) => Ok(None),
+            _ => Ok(Some("REFUNDED")),
+        }
+    }
+
+    async fn should_submit_refund_for_deadline_expiry(
+        &self,
+        record: &QuoteRecord,
+        to_status: &str,
+    ) -> Result<bool> {
+        if to_status != "REFUNDED" {
+            return Ok(false);
+        }
+        has_confirmed_deposit_amount(self.state.as_ref(), record.correlation_id).await
+    }
 }
 
 #[async_trait]
@@ -280,10 +318,16 @@ impl Lifecycle for DefaultLifecycle {
         }
 
         let record = self.load_quote(correlation_id).await?;
-        let Some(to_status) = target_status(&record, &event)? else {
+        let target_status = match &event {
+            LifecycleEvent::DeadlineExpired { .. } => {
+                self.target_status_for_deadline_expired(&record).await?
+            }
+            _ => target_status(&record, &event)?,
+        };
+        let Some(to_status) = target_status else {
             return Ok(());
         };
-        if !is_valid_transition(&record.status, to_status) {
+        if record.status != to_status && !is_valid_transition(&record.status, to_status) {
             return Err(anyhow!(
                 "illegal lifecycle transition for quote {}: {} -> {}",
                 correlation_id,
@@ -292,7 +336,15 @@ impl Lifecycle for DefaultLifecycle {
             ));
         }
 
-        self.persist_transition(&record, &event, to_status).await?;
+        let reason_override = match &event {
+            LifecycleEvent::DeadlineExpired { .. } => {
+                self.deadline_expired_reason(&record, to_status).await?
+            }
+            _ => None,
+        };
+
+        self.persist_transition(&record, &event, to_status, reason_override)
+            .await?;
 
         match event {
             LifecycleEvent::SlippageExceeded { .. } | LifecycleEvent::IncompleteDeposit { .. } => {
@@ -302,6 +354,14 @@ impl Lifecycle for DefaultLifecycle {
             LifecycleEvent::EvmDepositConfirmed { .. }
             | LifecycleEvent::MidenDepositConfirmed { .. }
                 if to_status == "INCOMPLETE_DEPOSIT" =>
+            {
+                let refreshed = self.load_quote(correlation_id).await?;
+                self.refund_record(&refreshed).await?;
+            }
+            LifecycleEvent::DeadlineExpired { .. }
+                if self
+                    .should_submit_refund_for_deadline_expiry(&record, to_status)
+                    .await? =>
             {
                 let refreshed = self.load_quote(correlation_id).await?;
                 self.refund_record(&refreshed).await?;
@@ -469,9 +529,11 @@ pub fn is_valid_transition(from: &str, to: &str) -> bool {
         ("PENDING_DEPOSIT", "KNOWN_DEPOSIT_TX")
             | ("KNOWN_DEPOSIT_TX", "PENDING_DEPOSIT")
             | ("KNOWN_DEPOSIT_TX", "INCOMPLETE_DEPOSIT")
+            | ("KNOWN_DEPOSIT_TX", "REFUNDED")
             | ("PENDING_DEPOSIT", "PROCESSING")
             | ("PENDING_DEPOSIT", "INCOMPLETE_DEPOSIT")
             | ("PENDING_DEPOSIT", "FAILED")
+            | ("PENDING_DEPOSIT", "REFUNDED")
             | ("PROCESSING", "SUCCESS")
             | ("PROCESSING", "FAILED")
             | ("PROCESSING", "REFUNDED")
@@ -609,9 +671,8 @@ fn target_status(record: &QuoteRecord, event: &LifecycleEvent) -> Result<Option<
         },
         LifecycleEvent::SettlementInitiated { .. } => Ok(Some("PROCESSING")),
         LifecycleEvent::SettlementSucceeded { .. } => Ok(Some("SUCCESS")),
-        LifecycleEvent::SettlementFailed { .. } | LifecycleEvent::DeadlineExpired { .. } => {
-            Ok(Some("FAILED"))
-        }
+        LifecycleEvent::SettlementFailed { .. } => Ok(Some("FAILED")),
+        LifecycleEvent::DeadlineExpired { .. } => Ok(Some("REFUNDED")),
         LifecycleEvent::SlippageExceeded { .. } => Ok(Some("REFUNDED")),
         LifecycleEvent::IncompleteDeposit { .. } => Ok(Some("INCOMPLETE_DEPOSIT")),
     }
@@ -747,15 +808,33 @@ fn is_terminal_status(status: &str) -> bool {
     )
 }
 
-fn refund_amount(record: &QuoteRecord) -> Result<String> {
-    if let Some(amount) = last_confirmed_amount(record) {
+async fn refund_amount(
+    store: &dyn crate::core::state::StateStore,
+    record: &QuoteRecord,
+) -> Result<String> {
+    if let Some(amount) = last_confirmed_amount(store, record.correlation_id).await? {
         return Ok(amount);
     }
     Ok(record.quote_response.quote.amount_in.clone())
 }
 
-fn last_confirmed_amount(_record: &QuoteRecord) -> Option<String> {
-    None
+async fn has_confirmed_deposit_amount(
+    store: &dyn crate::core::state::StateStore,
+    correlation_id: Uuid,
+) -> Result<bool> {
+    Ok(last_confirmed_amount(store, correlation_id)
+        .await?
+        .is_some())
+}
+
+async fn last_confirmed_amount(
+    store: &dyn crate::core::state::StateStore,
+    correlation_id: Uuid,
+) -> Result<Option<String>> {
+    store
+        .get_last_confirmed_deposit_amount(correlation_id)
+        .await
+        .context("failed to load last confirmed deposit amount")
 }
 
 fn evm_asset_for_origin(evm: &EvmClient, asset_id: &str) -> Result<EvmAsset> {

@@ -46,6 +46,20 @@ pub struct QuoteRecord {
     pub idempotency_keys: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeadlineScanQuote {
+    pub correlation_id: Uuid,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StuckProcessingQuote {
+    pub correlation_id: Uuid,
+    pub status: String,
+    pub updated_at: OffsetDateTime,
+    pub last_event_at: Option<OffsetDateTime>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EvmTrackedQuote {
     pub correlation_id: Uuid,
@@ -194,6 +208,21 @@ pub trait StateStore: Send + Sync {
         &self,
         record: &MidenBootstrapRecord,
     ) -> Result<(), StateStoreError>;
+
+    async fn get_last_confirmed_deposit_amount(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Option<String>, StateStoreError>;
+
+    async fn list_deadline_expired_quotes(
+        &self,
+        now: OffsetDateTime,
+    ) -> Result<Vec<DeadlineScanQuote>, StateStoreError>;
+
+    async fn list_stuck_processing_quotes(
+        &self,
+        updated_before: OffsetDateTime,
+    ) -> Result<Vec<StuckProcessingQuote>, StateStoreError>;
 
     async fn ping(&self) -> Result<(), StateStoreError>;
 }
@@ -653,6 +682,93 @@ impl StateStore for PostgresStateStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn get_last_confirmed_deposit_amount(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Option<String>, StateStoreError> {
+        let row = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT metadata ->> 'amount' AS amount
+            FROM lifecycle_events
+            WHERE correlation_id = $1
+              AND event_kind IN ('EVM_DEPOSIT_CONFIRMED', 'MIDEN_DEPOSIT_CONFIRMED')
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(correlation_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| row.try_get("amount").map_err(StateStoreError::from))
+            .transpose()
+    }
+
+    async fn list_deadline_expired_quotes(
+        &self,
+        now: OffsetDateTime,
+    ) -> Result<Vec<DeadlineScanQuote>, StateStoreError> {
+        let rows = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT correlation_id, status
+            FROM quotes
+            WHERE deadline IS NOT NULL
+              AND deadline <= $1
+              AND status IN ('KNOWN_DEPOSIT_TX', 'PENDING_DEPOSIT', 'PROCESSING')
+            ORDER BY deadline ASC, created_at ASC
+            "#,
+        )
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(DeadlineScanQuote {
+                    correlation_id: row.try_get("correlation_id")?,
+                    status: row.try_get("status")?,
+                })
+            })
+            .collect()
+    }
+
+    async fn list_stuck_processing_quotes(
+        &self,
+        updated_before: OffsetDateTime,
+    ) -> Result<Vec<StuckProcessingQuote>, StateStoreError> {
+        let rows = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT
+                q.correlation_id,
+                q.status,
+                q.updated_at,
+                (
+                    SELECT MAX(le.created_at)
+                    FROM lifecycle_events le
+                    WHERE le.correlation_id = q.correlation_id
+                ) AS last_event_at
+            FROM quotes q
+            WHERE q.status = 'PROCESSING'
+              AND q.updated_at < $1
+            ORDER BY q.updated_at ASC
+            "#,
+        )
+        .bind(updated_before)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(StuckProcessingQuote {
+                    correlation_id: row.try_get("correlation_id")?,
+                    status: row.try_get("status")?,
+                    updated_at: row.try_get("updated_at")?,
+                    last_event_at: row.try_get("last_event_at")?,
+                })
+            })
+            .collect()
     }
 
     async fn ping(&self) -> Result<(), StateStoreError> {

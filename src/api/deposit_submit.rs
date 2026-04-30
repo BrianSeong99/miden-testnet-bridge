@@ -5,12 +5,16 @@ use crate::{
     now_iso8601,
     types::{SubmitDepositTxRequest, SubmitDepositTxResponse, SwapStatus},
 };
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::{State, rejection::JsonRejection},
+};
 
 pub(crate) async fn submit_deposit(
     State(state): State<AppState>,
-    Json(request): Json<SubmitDepositTxRequest>,
+    request: Result<Json<SubmitDepositTxRequest>, JsonRejection>,
 ) -> Result<Json<SubmitDepositTxResponse>, ApiError> {
+    let Json(request) = request.map_err(ApiError::from_json_rejection)?;
     let quote_record = state
         .store
         .get_quote_by_deposit(&request.deposit_address, request.memo.as_deref())
