@@ -1,11 +1,21 @@
-use std::{env, net::SocketAddr};
+use std::{collections::HashMap, env, net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
-use axum::{Router, http::StatusCode, routing::get};
+use axum::{
+    Router,
+    routing::{get, post},
+};
+use time::OffsetDateTime;
+use tokio::sync::RwLock;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
+pub mod api;
 pub mod types;
+
+use crate::types::{QuoteResponse, SubmitDepositTxRequest};
+
+type QuoteKey = (String, Option<String>);
 
 #[derive(Clone, Debug)]
 struct Config {
@@ -23,6 +33,12 @@ struct Config {
 enum LogFormat {
     Json,
     Pretty,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct AppState {
+    pub(crate) quotes: Arc<RwLock<HashMap<QuoteKey, QuoteResponse>>>,
+    pub(crate) deposit_submissions: Arc<RwLock<Vec<SubmitDepositTxRequest>>>,
 }
 
 impl Config {
@@ -85,7 +101,7 @@ async fn main() -> Result<()> {
     config.validate()?;
     init_tracing(&config);
 
-    let app = app();
+    let app = app(AppState::default());
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await
         .context("failed to bind HTTP listener")?;
@@ -108,10 +124,25 @@ fn init_tracing(config: &Config) {
     }
 }
 
-fn app() -> Router {
-    Router::new().route("/healthz", get(healthz))
+pub(crate) fn app(state: AppState) -> Router {
+    Router::new()
+        .route("/v0/quote", post(api::quote::quote))
+        .route("/v0/status", get(api::status::status))
+        .route("/v0/tokens", get(api::tokens::tokens))
+        .route(
+            "/v0/deposit/submit",
+            post(api::deposit_submit::submit_deposit),
+        )
+        .route(
+            "/v0/any-input/withdrawals",
+            get(api::withdrawals::withdrawals),
+        )
+        .route("/healthz", get(api::healthz::healthz))
+        .with_state(state)
 }
 
-async fn healthz() -> StatusCode {
-    StatusCode::OK
+pub(crate) fn now_iso8601() -> String {
+    OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("RFC3339 formatting should succeed")
 }
