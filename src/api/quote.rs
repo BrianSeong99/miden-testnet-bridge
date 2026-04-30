@@ -1,4 +1,7 @@
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::{State, rejection::JsonRejection},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -15,8 +18,10 @@ use crate::{
 
 pub(crate) async fn quote(
     State(state): State<AppState>,
-    Json(request): Json<QuoteRequest>,
+    request: Result<Json<QuoteRequest>, JsonRejection>,
 ) -> Result<Json<QuoteResponse>, ApiError> {
+    let Json(request) = request.map_err(ApiError::from_json_rejection)?;
+
     if request
         .custom_recipient_msg
         .as_deref()
@@ -289,6 +294,29 @@ mod tests {
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn invalid_json_returns_spec_shaped_bad_request() {
+        let app = app(AppState::new(memory_state()));
+        let response = app
+            .oneshot(
+                Request::post("/v0/quote")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let error: crate::types::BadRequestResponse =
+            serde_json::from_slice(&body).expect("error response");
+        assert!(!error.message.is_empty());
     }
 
     #[tokio::test]

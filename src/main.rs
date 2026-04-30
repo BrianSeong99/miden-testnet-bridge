@@ -3,6 +3,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -15,6 +16,7 @@ use miden_testnet_bridge::{
         miden_outbound::poll_outbound_deposits,
     },
     core::{
+        hardening::{spawn_deadline_expiry_scanner, spawn_stuck_processing_scanner},
         lifecycle::{DefaultLifecycle, resume_in_flight_quotes},
         pricer::CoinGeckoPricer,
         state::{PostgresStateStore, connect_pool},
@@ -37,11 +39,13 @@ struct Config {
     http_port: u16,
     rust_log: String,
     log_format: LogFormat,
+    deadline_scan_interval_secs: u64,
 }
 
 impl Config {
     fn from_env() -> Result<Self> {
-        let rust_log = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_owned());
+        let rust_log = env::var("RUST_LOG")
+            .unwrap_or_else(|_| "info,sqlx=warn,hyper=warn,tower_http=warn".to_owned());
         let log_format = match env::var("LOG_FORMAT")
             .unwrap_or_else(|_| "json".to_owned())
             .as_str()
@@ -83,6 +87,10 @@ impl Config {
                 .context("BRIDGE_HTTP_PORT must be a valid u16")?,
             rust_log,
             log_format,
+            deadline_scan_interval_secs: env::var("DEADLINE_SCAN_INTERVAL_SECS")
+                .unwrap_or_else(|_| "30".to_owned())
+                .parse()
+                .context("DEADLINE_SCAN_INTERVAL_SECS must be a valid u64")?,
         })
     }
 
@@ -156,6 +164,9 @@ async fn main() -> Result<()> {
         miden.clone(),
     ));
     resume_in_flight_quotes(store.clone(), lifecycle.clone()).await?;
+    let deadline_scan_interval = Duration::from_secs(config.deadline_scan_interval_secs);
+    spawn_deadline_expiry_scanner(store.clone(), lifecycle.clone(), deadline_scan_interval);
+    spawn_stuck_processing_scanner(store.clone(), deadline_scan_interval);
     tokio::spawn(evm.clone().watch_deposits(lifecycle.clone()));
     let outbound_miden = miden.clone();
     let outbound_store = store.clone();

@@ -1,7 +1,10 @@
-use axum::{Json, extract::Query};
+use axum::{
+    Json,
+    extract::{Query, rejection::QueryRejection},
+};
 use serde::Deserialize;
 
-use crate::types::WithdrawalsResponse;
+use crate::{api::errors::ApiError, types::WithdrawalsResponse};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,13 +23,16 @@ pub struct WithdrawalsQuery {
     sort_order: Option<String>,
 }
 
-pub async fn withdrawals(Query(_query): Query<WithdrawalsQuery>) -> Json<WithdrawalsResponse> {
-    Json(WithdrawalsResponse {
+pub async fn withdrawals(
+    query: Result<Query<WithdrawalsQuery>, QueryRejection>,
+) -> Result<Json<WithdrawalsResponse>, ApiError> {
+    let Query(_query) = query.map_err(ApiError::from_query_rejection)?;
+    Ok(Json(WithdrawalsResponse {
         asset: "eth-anvil:eth".to_owned(),
         recipient: String::new(),
         affiliate_recipient: String::new(),
         withdrawals: Vec::new(),
-    })
+    }))
 }
 
 #[cfg(test)]

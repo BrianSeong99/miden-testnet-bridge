@@ -1,5 +1,6 @@
 use axum::{
     Json,
+    extract::rejection::{JsonRejection, QueryRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -33,6 +34,14 @@ impl ApiError {
         Self::Internal {
             message: message.into(),
         }
+    }
+
+    pub fn from_json_rejection(rejection: JsonRejection) -> Self {
+        Self::bad_request(rejection.body_text())
+    }
+
+    pub fn from_query_rejection(rejection: QueryRejection) -> Self {
+        Self::bad_request(rejection.body_text())
     }
 }
 

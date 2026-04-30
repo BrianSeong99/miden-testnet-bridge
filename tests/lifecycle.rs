@@ -77,7 +77,8 @@ impl Lifecycle for ResumeOnlyLifecycle {
 
 #[test]
 fn flex_input_bounds_cover_spec_ranges() {
-    let quote = sample_quote_response(Uuid::new_v4(), SwapType::FlexInput).quote;
+    let quote =
+        sample_quote_response(Uuid::new_v4(), SwapType::FlexInput, "2027-06-12T00:00:00Z").quote;
     let cases = [
         ("1100000", FlexInputDecision::AcceptAboveUpper),
         ("997500", FlexInputDecision::Accept),
@@ -96,9 +97,11 @@ fn valid_transitions_cover_legal_and_illegal_edges() {
     let legal = [
         ("PENDING_DEPOSIT", "KNOWN_DEPOSIT_TX"),
         ("KNOWN_DEPOSIT_TX", "PENDING_DEPOSIT"),
+        ("KNOWN_DEPOSIT_TX", "REFUNDED"),
         ("PENDING_DEPOSIT", "PROCESSING"),
         ("PENDING_DEPOSIT", "INCOMPLETE_DEPOSIT"),
         ("PENDING_DEPOSIT", "FAILED"),
+        ("PENDING_DEPOSIT", "REFUNDED"),
         ("PROCESSING", "SUCCESS"),
         ("PROCESSING", "FAILED"),
         ("PROCESSING", "REFUNDED"),
@@ -256,6 +259,129 @@ async fn settlement_failed_transitions_to_failed() {
 }
 
 #[tokio::test]
+async fn deadline_expired_without_deposit_transitions_to_refunded_without_refund_tx() {
+    let store = memory_state();
+    let lifecycle = build_lifecycle(store.clone(), Arc::new(MockPricer)).await;
+    let quote = insert_quote(store.clone(), SwapType::ExactInput).await;
+    let correlation_id = Uuid::parse_str(&quote.correlation_id).unwrap();
+
+    lifecycle
+        .apply(LifecycleEvent::DeadlineExpired { correlation_id })
+        .await
+        .unwrap();
+
+    let record = store
+        .get_quote_by_correlation_id(correlation_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.status, "REFUNDED");
+    assert!(record.evm_refund_tx_hashes.is_empty());
+}
+
+#[tokio::test]
+async fn deadline_expired_after_incomplete_deposit_leaves_terminal_incomplete_status() {
+    let store = memory_state();
+    let lifecycle = build_lifecycle(store.clone(), Arc::new(MockPricer)).await;
+    let quote = insert_quote(store.clone(), SwapType::FlexInput).await;
+    let correlation_id = Uuid::parse_str(&quote.correlation_id).unwrap();
+
+    lifecycle
+        .apply(LifecycleEvent::EvmDepositDetected {
+            correlation_id,
+            tx_hash: "0xdef".to_owned(),
+        })
+        .await
+        .unwrap();
+    lifecycle
+        .apply(LifecycleEvent::EvmDepositConfirmed {
+            correlation_id,
+            tx_hash: "0xdef".to_owned(),
+            amount: "984000".to_owned(),
+        })
+        .await
+        .unwrap();
+    lifecycle
+        .apply(LifecycleEvent::DeadlineExpired { correlation_id })
+        .await
+        .unwrap();
+
+    let record = store
+        .get_quote_by_correlation_id(correlation_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.status, "INCOMPLETE_DEPOSIT");
+    assert_eq!(
+        record.evm_refund_tx_hashes,
+        vec![format!("mock-refund-{correlation_id}")]
+    );
+}
+
+#[tokio::test]
+async fn deadline_expired_after_confirmed_deposit_submits_refund() {
+    let store = memory_state();
+    let lifecycle = build_lifecycle(store.clone(), Arc::new(MockPricer)).await;
+    let quote = insert_quote(store.clone(), SwapType::ExactInput).await;
+    let correlation_id = Uuid::parse_str(&quote.correlation_id).unwrap();
+
+    lifecycle
+        .apply(LifecycleEvent::EvmDepositDetected {
+            correlation_id,
+            tx_hash: "0xabc".to_owned(),
+        })
+        .await
+        .unwrap();
+    lifecycle
+        .apply(LifecycleEvent::EvmDepositConfirmed {
+            correlation_id,
+            tx_hash: "0xabc".to_owned(),
+            amount: "1000000".to_owned(),
+        })
+        .await
+        .unwrap();
+    lifecycle
+        .apply(LifecycleEvent::DeadlineExpired { correlation_id })
+        .await
+        .unwrap();
+
+    let record = store
+        .get_quote_by_correlation_id(correlation_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.status, "REFUNDED");
+    assert_eq!(
+        record.evm_refund_tx_hashes,
+        vec![format!("mock-refund-{correlation_id}")]
+    );
+}
+
+#[tokio::test]
+async fn deadline_expired_while_processing_is_ignored() {
+    let store = memory_state();
+    let lifecycle = build_lifecycle(store.clone(), Arc::new(MockPricer)).await;
+    let quote = insert_quote(store.clone(), SwapType::ExactInput).await;
+    let correlation_id = Uuid::parse_str(&quote.correlation_id).unwrap();
+
+    lifecycle
+        .apply(LifecycleEvent::SettlementInitiated { correlation_id })
+        .await
+        .unwrap();
+    lifecycle
+        .apply(LifecycleEvent::DeadlineExpired { correlation_id })
+        .await
+        .unwrap();
+
+    let record = store
+        .get_quote_by_correlation_id(correlation_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.status, "PROCESSING");
+}
+
+#[tokio::test]
 async fn replaying_same_event_is_a_no_op() {
     let store = memory_state();
     let lifecycle = build_lifecycle(store.clone(), Arc::new(MockPricer)).await;
@@ -381,7 +507,7 @@ async fn insert_quote_with_deadline(
 ) -> QuoteResponse {
     let correlation_id = Uuid::new_v4();
     let request = sample_quote_request(swap_type.clone(), deadline);
-    let response = sample_quote_response(correlation_id, swap_type);
+    let response = sample_quote_response(correlation_id, swap_type, deadline);
     store.insert_quote(&response, &request).await.unwrap();
     response
 }
@@ -412,12 +538,16 @@ fn sample_quote_request(swap_type: SwapType, deadline: &str) -> QuoteRequest {
     }
 }
 
-fn sample_quote_response(correlation_id: Uuid, swap_type: SwapType) -> QuoteResponse {
+fn sample_quote_response(
+    correlation_id: Uuid,
+    swap_type: SwapType,
+    deadline: &str,
+) -> QuoteResponse {
     QuoteResponse {
         correlation_id: correlation_id.to_string(),
         timestamp: "2026-04-30T00:00:00Z".to_owned(),
         signature: String::new(),
-        quote_request: sample_quote_request(swap_type.clone(), "2027-06-12T00:00:00Z"),
+        quote_request: sample_quote_request(swap_type.clone(), deadline),
         quote: Quote {
             deposit_address: Some(format!("mock-{correlation_id}")),
             deposit_memo: None,
@@ -430,8 +560,8 @@ fn sample_quote_response(correlation_id: Uuid, swap_type: SwapType) -> QuoteResp
             amount_out_formatted: "1.0".to_owned(),
             amount_out_usd: "1.0".to_owned(),
             min_amount_out: "995000".to_owned(),
-            deadline: Some("2027-06-12T00:00:00Z".to_owned()),
-            time_when_inactive: Some("2027-06-12T00:00:00Z".to_owned()),
+            deadline: Some(deadline.to_owned()),
+            time_when_inactive: Some(deadline.to_owned()),
             time_estimate: 120.0,
             virtual_chain_recipient: None,
             virtual_chain_refund_recipient: None,

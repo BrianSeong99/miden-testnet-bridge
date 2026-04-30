@@ -23,7 +23,7 @@ services:
       EVM_CHAIN_ID: ${EVM_CHAIN_ID:-271828}
       EVM_TOKEN_ADDRESSES_PATH: ${EVM_TOKEN_ADDRESSES_PATH:-/state/token-addresses.json}
       BRIDGE_HTTP_PORT: ${BRIDGE_HTTP_PORT:-8080}
-      RUST_LOG: ${RUST_LOG:-info}
+      RUST_LOG: ${RUST_LOG:-info,sqlx=warn,hyper=warn,tower_http=warn}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     ports:
       - "${BRIDGE_HTTP_PORT:-8080}:8080"

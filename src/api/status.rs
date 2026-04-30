@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Query, State, rejection::QueryRejection},
 };
 use serde::Deserialize;
 
@@ -20,8 +20,9 @@ pub struct StatusQuery {
 
 pub(crate) async fn status(
     State(state): State<AppState>,
-    Query(query): Query<StatusQuery>,
+    query: Result<Query<StatusQuery>, QueryRejection>,
 ) -> Result<Json<StatusResponse>, ApiError> {
+    let Query(query) = query.map_err(ApiError::from_query_rejection)?;
     let record = state
         .store
         .get_quote_by_deposit(&query.deposit_address, query.deposit_memo.as_deref())
