@@ -5,25 +5,78 @@ services:
     build:
       context: .
     depends_on:
+      anvil:
+        condition: service_healthy
+      anvil-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/miden_bridge}
       MIDEN_RPC_URL: ${MIDEN_RPC_URL:-http://host.docker.internal:57291}
-      EVM_RPC_URL: ${EVM_RPC_URL:-http://host.docker.internal:8545}
-      MASTER_MNEMONIC: ${MASTER_MNEMONIC:-replace-with-master-mnemonic}
-      SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-replace-with-solver-private-key}
+      EVM_RPC_URL: ${EVM_RPC_URL:-http://anvil:8545}
+      MASTER_MNEMONIC: ${MASTER_MNEMONIC:-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about}
+      SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382dbb7d2745078b2336b91c60d50d6b6d7}
+      EVM_CHAIN_ID: ${EVM_CHAIN_ID:-271828}
+      EVM_TOKEN_ADDRESSES_PATH: ${EVM_TOKEN_ADDRESSES_PATH:-/state/token-addresses.json}
       BRIDGE_HTTP_PORT: ${BRIDGE_HTTP_PORT:-8080}
       RUST_LOG: ${RUST_LOG:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     ports:
       - "${BRIDGE_HTTP_PORT:-8080}:8080"
+    volumes:
+      - anvil-state:/state:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    command:
+      - anvil
+      - --host
+      - 0.0.0.0
+      - --chain-id
+      - "271828"
+      - --block-time
+      - "1"
+      - --state
+      - /state/anvil.json
+      - --mnemonic
+      - "test test test test test test test test test test test junk"
+      - --balance
+      - "100000"
+    ports:
+      - "8545:8545"
+    volumes:
+      - anvil-state:/state
+      - ./scripts/anvil_bootstrap.sh:/bootstrap/anvil_bootstrap.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "cast rpc eth_blockNumber --rpc-url http://localhost:8545 | grep -Eq '^0x[0-9a-fA-F]+$'"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 3s
+
+  anvil-init:
+    image: ghcr.io/foundry-rs/foundry:latest
+    depends_on:
+      anvil:
+        condition: service_healthy
+    environment:
+      RPC_URL: http://anvil:8545
+      STATE_DIR: /state
+      PROJECT_ROOT: /workspace
+      SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382dbb7d2745078b2336b91c60d50d6b6d7}
+    volumes:
+      - anvil-state:/state
+      - ./scripts/anvil_bootstrap.sh:/bootstrap/anvil_bootstrap.sh:ro
+      - ./contracts:/workspace/contracts:ro
+      - ./foundry.toml:/workspace/foundry.toml:ro
+    command: ["/bin/bash", "/bootstrap/anvil_bootstrap.sh"]
 
   postgres:
     image: postgres:17
@@ -43,5 +96,5 @@ services:
       start_period: 5s
 
 volumes:
+  anvil-state:
   postgres-data:
-

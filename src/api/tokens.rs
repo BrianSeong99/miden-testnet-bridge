@@ -1,11 +1,14 @@
-use std::env;
-
 use axum::Json;
 
-use crate::{now_iso8601, types::TokenResponse};
+use crate::{
+    chains::evm::{load_token_address_file, token_addresses_path_from_env},
+    now_iso8601,
+    types::TokenResponse,
+};
 
 pub async fn tokens() -> Json<Vec<TokenResponse>> {
     let timestamp = now_iso8601();
+    let addresses = load_token_address_file(&token_addresses_path_from_env()).unwrap_or_default();
 
     Json(vec![
         TokenResponse {
@@ -24,7 +27,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             symbol: "USDC".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
-            contract_address: env::var("ETH_ANVIL_USDC_CONTRACT_ADDRESS").ok(),
+            contract_address: addresses.usdc.clone(),
         },
         TokenResponse {
             asset_id: "eth-anvil:usdt".to_owned(),
@@ -33,7 +36,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             symbol: "USDT".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
-            contract_address: env::var("ETH_ANVIL_USDT_CONTRACT_ADDRESS").ok(),
+            contract_address: addresses.usdt.clone(),
         },
         TokenResponse {
             asset_id: "eth-anvil:btc".to_owned(),
@@ -42,7 +45,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             symbol: "BTC".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
-            contract_address: env::var("ETH_ANVIL_BTC_CONTRACT_ADDRESS").ok(),
+            contract_address: addresses.btc.clone(),
         },
         TokenResponse {
             asset_id: "miden-local:eth".to_owned(),

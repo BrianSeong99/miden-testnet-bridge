@@ -7,7 +7,9 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
-    core::state::{DynStateStore, QuoteRecord, StateStore, StateStoreError, TxHashColumn},
+    core::state::{
+        DynStateStore, EvmTrackedQuote, QuoteRecord, StateStore, StateStoreError, TxHashColumn,
+    },
     types::{QuoteRequest, QuoteResponse},
 };
 
@@ -58,9 +60,11 @@ impl StateStore for MemoryStateStore {
             key,
             QuoteRecord {
                 correlation_id,
+                quote_request: _request.clone(),
                 quote_response: quote.clone(),
                 status: "PENDING_DEPOSIT".to_owned(),
                 updated_at: OffsetDateTime::now_utc(),
+                evm_deposit_derivation_path: None,
                 evm_deposit_tx_hashes: Vec::new(),
                 evm_release_tx_hashes: Vec::new(),
                 miden_mint_tx_ids: Vec::new(),
@@ -154,6 +158,45 @@ impl StateStore for MemoryStateStore {
         }
 
         Ok(())
+    }
+
+    async fn set_evm_deposit_derivation_path(
+        &self,
+        correlation_id: Uuid,
+        derivation_path: &str,
+    ) -> Result<(), StateStoreError> {
+        for quote in self.state.lock().await.quotes.values_mut() {
+            if quote.correlation_id == correlation_id {
+                quote.updated_at = OffsetDateTime::now_utc();
+                quote.evm_deposit_derivation_path = Some(derivation_path.to_owned());
+                return Ok(());
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn list_evm_tracked_quotes(&self) -> Result<Vec<EvmTrackedQuote>, StateStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .quotes
+            .values()
+            .map(|quote| EvmTrackedQuote {
+                correlation_id: quote.correlation_id,
+                deposit_address: quote
+                    .quote_response
+                    .quote
+                    .deposit_address
+                    .clone()
+                    .expect("memory quote should have deposit address"),
+                origin_asset: quote.quote_request.origin_asset.clone(),
+                amount_in: quote.quote_response.quote.amount_in.clone(),
+                status: quote.status.clone(),
+                evm_deposit_derivation_path: quote.evm_deposit_derivation_path.clone(),
+            })
+            .collect())
     }
 
     async fn ping(&self) -> Result<(), StateStoreError> {

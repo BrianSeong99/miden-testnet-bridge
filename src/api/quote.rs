@@ -4,6 +4,7 @@ use uuid::Uuid;
 use crate::{
     AppState,
     api::errors::ApiError,
+    chains::evm::evm_quote_requires_deposit_address,
     now_iso8601,
     types::{DepositMode, Quote, QuoteRequest, QuoteResponse},
 };
@@ -28,12 +29,29 @@ pub(crate) async fn quote(
         ));
     }
 
-    let correlation_id = Uuid::new_v4().to_string();
+    let correlation_id = Uuid::new_v4();
     let timestamp = now_iso8601();
-    let deposit_address = (!request.dry).then(|| format!("mock-{correlation_id}"));
+    let mut deposit_derivation_path = None;
+    let deposit_address = if request.dry {
+        None
+    } else if evm_quote_requires_deposit_address(&request.origin_asset, &request.destination_asset)
+    {
+        if let Some(evm) = state.evm.as_ref() {
+            let (address, derivation_path) = evm
+                .derive_deposit_address(correlation_id)
+                .await
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+            deposit_derivation_path = Some(derivation_path);
+            Some(address.to_string())
+        } else {
+            Some(format!("mock-{correlation_id}"))
+        }
+    } else {
+        Some(format!("mock-{correlation_id}"))
+    };
 
     let response = QuoteResponse {
-        correlation_id: correlation_id.clone(),
+        correlation_id: correlation_id.to_string(),
         timestamp,
         // TODO: Quote signing lands in a later iteration.
         signature: String::new(),
@@ -66,6 +84,11 @@ pub(crate) async fn quote(
             .insert_quote(&response, &request)
             .await
             .map_err(|error| ApiError::internal(error.to_string()))?;
+        if let (Some(evm), Some(derivation_path)) = (state.evm.as_ref(), deposit_derivation_path) {
+            evm.persist_deposit_derivation_path(correlation_id, &derivation_path)
+                .await
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+        }
     }
 
     Ok(Json(response))
