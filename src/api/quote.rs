@@ -5,7 +5,8 @@ use crate::{
     AppState,
     api::errors::ApiError,
     chains::{
-        evm::evm_quote_requires_deposit_address, miden::miden_quote_requires_deposit_address,
+        evm::evm_quote_requires_deposit_address, miden::asset_symbol,
+        miden::miden_quote_requires_deposit_address,
         miden_deposit_account::derive_outbound_deposit_account,
     },
     now_iso8601,
@@ -77,6 +78,22 @@ pub(crate) async fn quote(
         Some(format!("mock-{correlation_id}"))
     };
 
+    let origin_symbol = asset_symbol(&request.origin_asset)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let destination_symbol = asset_symbol(&request.destination_asset)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let price_quote = state
+        .pricer
+        .quote(origin_symbol, destination_symbol, &request.amount)
+        .await
+        .map_err(|error| match error {
+            crate::core::pricer::PricerError::UnsupportedAssetSymbol(_)
+            | crate::core::pricer::PricerError::InvalidAmount(_) => {
+                ApiError::bad_request(error.to_string())
+            }
+            _ => ApiError::internal(error.to_string()),
+        })?;
+
     let response = QuoteResponse {
         correlation_id: correlation_id.to_string(),
         timestamp,
@@ -88,13 +105,13 @@ pub(crate) async fn quote(
             deposit_memo: None,
             amount_in: request.amount.clone(),
             amount_in_formatted: request.amount.clone(),
-            amount_in_usd: "1.0".to_owned(),
+            amount_in_usd: price_quote.input_usd,
             min_amount_in: request.amount.clone(),
             max_amount_in: None,
-            amount_out: request.amount.clone(),
-            amount_out_formatted: request.amount.clone(),
-            amount_out_usd: "1.0".to_owned(),
-            min_amount_out: request.amount.clone(),
+            amount_out: price_quote.output_amount.clone(),
+            amount_out_formatted: price_quote.output_amount.clone(),
+            amount_out_usd: price_quote.output_usd,
+            min_amount_out: price_quote.output_amount,
             deadline: (!request.dry).then(|| request.deadline.clone()),
             time_when_inactive: (!request.dry).then(|| request.deadline.clone()),
             time_estimate: 120.0,

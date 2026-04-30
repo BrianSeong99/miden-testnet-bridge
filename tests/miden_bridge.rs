@@ -31,6 +31,7 @@ use miden_testnet_bridge::{
         miden_inbound::mint_to_user,
         miden_outbound::{parse_persisted_miden_seed_hex, poll_outbound_deposits_once},
     },
+    core::pricer::MockPricer,
     test_support::memory_state,
 };
 use rand::SeedableRng;
@@ -178,6 +179,7 @@ async fn outbound_flow_consumes_note_and_releases_on_evm() {
     let recipient = Address::from_str("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc").unwrap();
     let app = app(AppState::with_clients(
         store.clone(),
+        Arc::new(MockPricer),
         evm.clone(),
         miden.clone(),
         TEST_MASTER_SEED,

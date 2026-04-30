@@ -15,11 +15,13 @@ pub mod core;
 pub mod test_support;
 pub mod types;
 
+use crate::core::pricer::{DynPricer, MockPricer};
 use crate::core::state::DynStateStore;
 
 #[derive(Clone)]
 pub struct AppState {
     pub store: DynStateStore,
+    pub pricer: DynPricer,
     pub evm: Option<Arc<EvmClient>>,
     pub miden: Option<Arc<dyn MidenHealthCheck>>,
     pub miden_client: Option<Arc<MidenClient>>,
@@ -30,6 +32,7 @@ impl AppState {
     pub fn new(store: DynStateStore) -> Self {
         Self {
             store,
+            pricer: Arc::new(MockPricer),
             evm: None,
             miden: None,
             miden_client: None,
@@ -40,6 +43,7 @@ impl AppState {
     pub fn with_evm(store: DynStateStore, evm: Arc<EvmClient>) -> Self {
         Self {
             store,
+            pricer: Arc::new(MockPricer),
             evm: Some(evm),
             miden: None,
             miden_client: None,
@@ -49,17 +53,24 @@ impl AppState {
 
     pub fn with_clients(
         store: DynStateStore,
+        pricer: DynPricer,
         evm: Arc<EvmClient>,
         miden: Arc<MidenClient>,
         miden_master_seed: [u8; 32],
     ) -> Self {
         Self {
             store,
+            pricer,
             evm: Some(evm),
             miden: Some(miden.clone()),
             miden_client: Some(miden),
             miden_master_seed: Some(miden_master_seed),
         }
+    }
+
+    pub fn with_pricer(mut self, pricer: DynPricer) -> Self {
+        self.pricer = pricer;
+        self
     }
 }
 

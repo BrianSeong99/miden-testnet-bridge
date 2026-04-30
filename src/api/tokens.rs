@@ -1,22 +1,23 @@
-use axum::Json;
+use axum::{Json, extract::State};
 
 use crate::{
+    AppState,
+    api::errors::ApiError,
     chains::evm::{load_token_address_file, token_addresses_path_from_env},
     now_iso8601,
     types::TokenResponse,
 };
 
-pub async fn tokens() -> Json<Vec<TokenResponse>> {
+pub async fn tokens(State(state): State<AppState>) -> Result<Json<Vec<TokenResponse>>, ApiError> {
     let timestamp = now_iso8601();
     let addresses = load_token_address_file(&token_addresses_path_from_env()).unwrap_or_default();
-
-    Json(vec![
+    let mut tokens = vec![
         TokenResponse {
             asset_id: "eth-anvil:eth".to_owned(),
             decimals: 18.0,
             blockchain: "eth".to_owned(),
             symbol: "ETH".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp.clone(),
             contract_address: None,
         },
@@ -25,7 +26,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             decimals: 6.0,
             blockchain: "eth".to_owned(),
             symbol: "USDC".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp.clone(),
             contract_address: addresses.usdc.clone(),
         },
@@ -34,7 +35,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             decimals: 6.0,
             blockchain: "eth".to_owned(),
             symbol: "USDT".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp.clone(),
             contract_address: addresses.usdt.clone(),
         },
@@ -43,7 +44,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             decimals: 8.0,
             blockchain: "eth".to_owned(),
             symbol: "BTC".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp.clone(),
             contract_address: addresses.btc.clone(),
         },
@@ -52,7 +53,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             decimals: 18.0,
             blockchain: "miden".to_owned(),
             symbol: "ETH".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp.clone(),
             contract_address: None,
         },
@@ -61,7 +62,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             decimals: 6.0,
             blockchain: "miden".to_owned(),
             symbol: "USDC".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp.clone(),
             contract_address: None,
         },
@@ -70,7 +71,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             decimals: 6.0,
             blockchain: "miden".to_owned(),
             symbol: "USDT".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp.clone(),
             contract_address: None,
         },
@@ -79,11 +80,26 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
             decimals: 8.0,
             blockchain: "miden".to_owned(),
             symbol: "BTC".to_owned(),
-            price: 1.0,
+            price: 0.0,
             price_updated_at: timestamp,
             contract_address: None,
         },
-    ])
+    ];
+
+    for token in &mut tokens {
+        let unit_amount = format!("1{}", "0".repeat(token.decimals as usize));
+        let quote = state
+            .pricer
+            .quote(&token.symbol, &token.symbol, &unit_amount)
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        token.price = quote
+            .input_usd
+            .parse::<f64>()
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+    }
+
+    Ok(Json(tokens))
 }
 
 #[cfg(test)]
