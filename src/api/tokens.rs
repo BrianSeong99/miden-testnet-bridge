@@ -2,10 +2,7 @@ use std::env;
 
 use axum::Json;
 
-use crate::{
-    now_iso8601,
-    types::{Blockchain, TokenResponse},
-};
+use crate::{now_iso8601, types::TokenResponse};
 
 pub async fn tokens() -> Json<Vec<TokenResponse>> {
     let timestamp = now_iso8601();
@@ -14,7 +11,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "eth-anvil:eth".to_owned(),
             decimals: 18.0,
-            blockchain: Blockchain::Eth,
+            blockchain: "eth".to_owned(),
             symbol: "ETH".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
@@ -23,7 +20,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "eth-anvil:usdc".to_owned(),
             decimals: 6.0,
-            blockchain: Blockchain::Eth,
+            blockchain: "eth".to_owned(),
             symbol: "USDC".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
@@ -32,7 +29,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "eth-anvil:usdt".to_owned(),
             decimals: 6.0,
-            blockchain: Blockchain::Eth,
+            blockchain: "eth".to_owned(),
             symbol: "USDT".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
@@ -41,7 +38,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "eth-anvil:btc".to_owned(),
             decimals: 8.0,
-            blockchain: Blockchain::Eth,
+            blockchain: "eth".to_owned(),
             symbol: "BTC".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
@@ -50,7 +47,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "miden-local:eth".to_owned(),
             decimals: 18.0,
-            blockchain: Blockchain::Near,
+            blockchain: "miden".to_owned(),
             symbol: "ETH".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
@@ -59,7 +56,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "miden-local:usdc".to_owned(),
             decimals: 6.0,
-            blockchain: Blockchain::Near,
+            blockchain: "miden".to_owned(),
             symbol: "USDC".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
@@ -68,7 +65,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "miden-local:usdt".to_owned(),
             decimals: 6.0,
-            blockchain: Blockchain::Near,
+            blockchain: "miden".to_owned(),
             symbol: "USDT".to_owned(),
             price: 1.0,
             price_updated_at: timestamp.clone(),
@@ -77,7 +74,7 @@ pub async fn tokens() -> Json<Vec<TokenResponse>> {
         TokenResponse {
             asset_id: "miden-local:btc".to_owned(),
             decimals: 8.0,
-            blockchain: Blockchain::Near,
+            blockchain: "miden".to_owned(),
             symbol: "BTC".to_owned(),
             price: 1.0,
             price_updated_at: timestamp,

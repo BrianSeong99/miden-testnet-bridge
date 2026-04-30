@@ -1,38 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Blockchain {
-    Near,
-    Eth,
-    Base,
-    Arb,
-    Btc,
-    Sol,
-    Ton,
-    Dash,
-    Doge,
-    Xrp,
-    Zec,
-    Gnosis,
-    Bera,
-    Bsc,
-    Pol,
-    Tron,
-    Sui,
-    Op,
-    Avax,
-    Cardano,
-    Ltc,
-    Xlayer,
-    Monad,
-    Bch,
-    Adi,
-    Plasma,
-    Scroll,
-    Starknet,
-    Aleo,
-}
+/// Blockchain identifier used in `/v0/tokens` and elsewhere. Spec defines a
+/// closed enum (near, eth, base, arb, btc, sol, ton, ...), but our mock emits
+/// "miden" for testnet entries — outside the spec set. Keeping this as a free
+/// string lets the mock populate non-spec values now; consumers normalize at
+/// cutover when the real endpoint replaces ours.
+pub type Blockchain = String;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -198,7 +171,6 @@ pub struct QuoteResponse {
 #[serde(rename_all = "camelCase")]
 pub struct BadRequestResponse {
     pub message: String,
-    pub code: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -440,7 +412,7 @@ mod tests {
         let token = TokenResponse {
             asset_id: "nep141:wrap.near".to_owned(),
             decimals: 24.0,
-            blockchain: Blockchain::Near,
+            blockchain: "near".to_owned(),
             symbol: "wNEAR".to_owned(),
             price: 2.79,
             price_updated_at: "2025-03-28T12:23:00.070Z".to_owned(),
@@ -501,7 +473,6 @@ mod tests {
     fn bad_request_response_round_trip() {
         round_trip(&BadRequestResponse {
             message: "error message".to_owned(),
-            code: "BAD_REQUEST".to_owned(),
         });
     }
 

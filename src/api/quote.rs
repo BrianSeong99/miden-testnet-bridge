@@ -19,14 +19,12 @@ pub(crate) async fn quote(
     {
         return Err(ApiError::bad_request(
             "customRecipientMsg is not supported for Miden bridge quotes",
-            "CUSTOM_RECIPIENT_MSG_UNSUPPORTED",
         ));
     }
 
     if request.deposit_mode == Some(DepositMode::Memo) {
         return Err(ApiError::bad_request(
             "depositMode MEMO is not supported for Miden bridge quotes",
-            "DEPOSIT_MODE_MEMO_UNSUPPORTED",
         ));
     }
 

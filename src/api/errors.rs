@@ -9,34 +9,32 @@ use crate::types::BadRequestResponse;
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error("{message}")]
-    BadRequest { message: String, code: String },
+    BadRequest { message: String },
     #[error("{message}")]
-    NotFound { message: String, code: String },
+    NotFound { message: String },
 }
 
 impl ApiError {
-    pub fn bad_request(message: impl Into<String>, code: impl Into<String>) -> Self {
+    pub fn bad_request(message: impl Into<String>) -> Self {
         Self::BadRequest {
             message: message.into(),
-            code: code.into(),
         }
     }
 
-    pub fn not_found(message: impl Into<String>, code: impl Into<String>) -> Self {
+    pub fn not_found(message: impl Into<String>) -> Self {
         Self::NotFound {
             message: message.into(),
-            code: code.into(),
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, message, code) = match self {
-            Self::BadRequest { message, code } => (StatusCode::BAD_REQUEST, message, code),
-            Self::NotFound { message, code } => (StatusCode::NOT_FOUND, message, code),
+        let (status, message) = match self {
+            Self::BadRequest { message } => (StatusCode::BAD_REQUEST, message),
+            Self::NotFound { message } => (StatusCode::NOT_FOUND, message),
         };
 
-        (status, Json(BadRequestResponse { message, code })).into_response()
+        (status, Json(BadRequestResponse { message })).into_response()
     }
 }

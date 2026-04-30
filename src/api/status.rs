@@ -28,7 +28,7 @@ pub(crate) async fn status(
         .await
         .get(&key)
         .cloned()
-        .ok_or_else(|| ApiError::not_found("deposit address not found", "DEPOSIT_NOT_FOUND"))?;
+        .ok_or_else(|| ApiError::not_found("deposit address not found"))?;
 
     Ok(Json(StatusResponse {
         correlation_id: quote_response.correlation_id.clone(),

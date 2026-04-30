@@ -24,7 +24,7 @@ pub(crate) async fn submit_deposit(
         .await
         .get(&key)
         .cloned()
-        .ok_or_else(|| ApiError::bad_request("deposit address not found", "DEPOSIT_NOT_FOUND"))?;
+        .ok_or_else(|| ApiError::bad_request("deposit address not found"))?;
 
     Ok(Json(SubmitDepositTxResponse {
         correlation_id: quote_response.correlation_id.clone(),
