@@ -1,0 +1,47 @@
+name: miden-testnet-bridge
+
+services:
+  bridge:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/miden_bridge}
+      MIDEN_RPC_URL: ${MIDEN_RPC_URL:-http://host.docker.internal:57291}
+      EVM_RPC_URL: ${EVM_RPC_URL:-http://host.docker.internal:8545}
+      MASTER_MNEMONIC: ${MASTER_MNEMONIC:-replace-with-master-mnemonic}
+      SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-replace-with-solver-private-key}
+      BRIDGE_HTTP_PORT: ${BRIDGE_HTTP_PORT:-8080}
+      RUST_LOG: ${RUST_LOG:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    ports:
+      - "${BRIDGE_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: miden_bridge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d miden_bridge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  postgres-data:
+

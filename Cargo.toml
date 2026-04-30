@@ -1,0 +1,23 @@
+[package]
+name = "miden-testnet-bridge"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+axum = "0.8"
+alloy = { version = "2.0", default-features = false, features = ["providers", "provider-http", "signers", "signer-mnemonic", "reqwest-rustls-tls"] }
+miden-client = { version = "=0.14.3", features = ["tonic"] }
+miden-client-sqlite-store = { version = "=0.14.3" }
+reqwest = { version = "0.13", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { package = "sqlx-core", version = "=0.8.6", features = ["_rt-tokio", "_tls-rustls-ring-native-roots", "json", "migrate", "time", "uuid"] }
+sqlx-postgres = { version = "=0.8.6", features = ["json", "migrate", "time", "uuid"] }
+thiserror = "2.0"
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }

@@ -1,0 +1,14 @@
+services:
+  bridge:
+    ports: []
+    networks:
+      - default
+      - homelab
+
+  postgres:
+    ports: []
+
+networks:
+  homelab:
+    external: true
+
