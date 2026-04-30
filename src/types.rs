@@ -198,6 +198,7 @@ pub struct QuoteResponse {
 #[serde(rename_all = "camelCase")]
 pub struct BadRequestResponse {
     pub message: String,
+    pub code: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -494,6 +495,14 @@ mod tests {
         };
 
         round_trip(&response);
+    }
+
+    #[test]
+    fn bad_request_response_round_trip() {
+        round_trip(&BadRequestResponse {
+            message: "error message".to_owned(),
+            code: "BAD_REQUEST".to_owned(),
+        });
     }
 
     #[test]
