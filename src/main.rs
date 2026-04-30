@@ -5,6 +5,8 @@ use axum::{Router, http::StatusCode, routing::get};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
+pub mod types;
+
 #[derive(Clone, Debug)]
 struct Config {
     database_url: String,
