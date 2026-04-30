@@ -1,9 +1,7 @@
 use std::{
     collections::HashMap,
     env,
-    future::Future,
     path::{Path, PathBuf},
-    pin::Pin,
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -31,11 +29,11 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    chains::{
-        miden::MidenClient, miden_bootstrap::bootstrap_state_from_record,
-        miden_inbound::mint_quote_to_user,
+    chains::{miden::MidenClient, miden_bootstrap::bootstrap_state_from_record},
+    core::{
+        lifecycle::{DynLifecycle, LifecycleEvent},
+        state::{DynStateStore, EvmTrackedQuote, TxHashColumn},
     },
-    core::state::{DynStateStore, EvmTrackedQuote, TxHashColumn},
 };
 
 sol! {
@@ -79,6 +77,12 @@ pub struct TokenAddressFile {
 #[derive(Clone, Debug)]
 struct TokenContracts {
     by_asset_id: HashMap<String, Address>,
+}
+
+struct PersistedSend<'a> {
+    tx_column: TxHashColumn,
+    idempotency_prefix: &'a str,
+    action: &'a str,
 }
 
 impl EvmClient {
@@ -126,11 +130,11 @@ impl EvmClient {
             .context("failed to persist EVM derivation path")
     }
 
-    pub async fn watch_deposits(self: Arc<Self>) {
+    pub async fn watch_deposits(self: Arc<Self>, lifecycle: DynLifecycle) {
         let mut poller = interval(Duration::from_secs(2));
         loop {
             poller.tick().await;
-            if let Err(error) = self.poll_once().await {
+            if let Err(error) = self.poll_once(lifecycle.clone()).await {
                 error!(?error, "EVM deposit poll failed");
             }
         }
@@ -143,6 +147,49 @@ impl EvmClient {
         asset: EvmAsset,
         amount: U256,
     ) -> Result<B256> {
+        self.send_with_persistence(
+            correlation_id,
+            to,
+            asset,
+            amount,
+            PersistedSend {
+                tx_column: TxHashColumn::EvmReleaseTxHashes,
+                idempotency_prefix: "evm_release",
+                action: "EVM release",
+            },
+        )
+        .await
+    }
+
+    pub async fn refund(
+        &self,
+        correlation_id: Uuid,
+        to: Address,
+        asset: EvmAsset,
+        amount: U256,
+    ) -> Result<B256> {
+        self.send_with_persistence(
+            correlation_id,
+            to,
+            asset,
+            amount,
+            PersistedSend {
+                tx_column: TxHashColumn::EvmRefundTxHashes,
+                idempotency_prefix: "evm_refund",
+                action: "EVM refund",
+            },
+        )
+        .await
+    }
+
+    async fn send_with_persistence(
+        &self,
+        correlation_id: Uuid,
+        to: Address,
+        asset: EvmAsset,
+        amount: U256,
+        persisted: PersistedSend<'_>,
+    ) -> Result<B256> {
         let tx = match asset {
             EvmAsset::NativeEth => TransactionRequest::default().with_to(to).with_value(amount),
             EvmAsset::Erc20(token) => TransactionRequest::default()
@@ -154,29 +201,29 @@ impl EvmClient {
             .signer_provider
             .send_transaction(tx)
             .await
-            .context("failed to send EVM release transaction")?;
+            .with_context(|| format!("failed to send {} transaction", persisted.action))?;
         let tx_hash = *pending.tx_hash();
-        let idempotency_key = format!("evm_release_{tx_hash:#x}");
+        let idempotency_key = format!("{}_{tx_hash:#x}", persisted.idempotency_prefix);
         if self
             .store
             .record_idempotency_key(correlation_id, &idempotency_key)
             .await
-            .context("failed to persist EVM release idempotency key")?
+            .with_context(|| format!("failed to persist {} idempotency key", persisted.action))?
         {
             self.store
                 .append_tx_hash(
                     correlation_id,
-                    TxHashColumn::EvmReleaseTxHashes,
+                    persisted.tx_column,
                     &format!("{tx_hash:#x}"),
                 )
                 .await
-                .context("failed to persist EVM release tx hash")?;
+                .with_context(|| format!("failed to persist {} tx hash", persisted.action))?;
         }
         pending
             .with_required_confirmations(1)
             .watch()
             .await
-            .context("failed waiting for EVM release confirmation")?;
+            .with_context(|| format!("failed waiting for {} confirmation", persisted.action))?;
         Ok(tx_hash)
     }
 
@@ -240,7 +287,7 @@ impl EvmClient {
         Ok(true)
     }
 
-    async fn poll_once(&self) -> Result<()> {
+    async fn poll_once(&self, lifecycle: DynLifecycle) -> Result<()> {
         let latest_block = self
             .provider
             .get_block_number()
@@ -259,18 +306,24 @@ impl EvmClient {
 
             match quote.status.as_str() {
                 "PENDING_DEPOSIT" => {
-                    if let Some((tx_hash, detected_block)) =
+                    if let Some((tx_hash, detected_block, _amount)) =
                         self.detect_deposit(&quote, latest_block).await?
                     {
-                        self.handle_detected_deposit(&quote, tx_hash, detected_block)
-                            .await?;
+                        self.handle_detected_deposit(
+                            &quote,
+                            tx_hash,
+                            detected_block,
+                            lifecycle.clone(),
+                        )
+                        .await?;
                     }
                 }
                 "KNOWN_DEPOSIT_TX" => {
-                    self.handle_confirmed_deposit(&quote, latest_block).await?;
+                    self.handle_confirmed_deposit(&quote, latest_block, lifecycle.clone())
+                        .await?;
                 }
                 "PROCESSING" => {
-                    self.complete_processing(&quote).await?;
+                    lifecycle.settle(quote.correlation_id).await?;
                 }
                 _ => {}
             }
@@ -283,11 +336,9 @@ impl EvmClient {
         &self,
         quote: &EvmTrackedQuote,
         latest_block: u64,
-    ) -> Result<Option<(B256, u64)>> {
+    ) -> Result<Option<(B256, u64, String)>> {
         let deposit_address = Address::from_str(&quote.deposit_address)
             .with_context(|| format!("invalid deposit address {}", quote.deposit_address))?;
-        let threshold = U256::from_str(&quote.amount_in)
-            .with_context(|| format!("invalid quote amount {}", quote.amount_in))?;
 
         if quote.origin_asset == "eth-anvil:eth" {
             let balance = self
@@ -295,11 +346,11 @@ impl EvmClient {
                 .get_balance(deposit_address)
                 .await
                 .context("failed to read deposit balance")?;
-            if balance < threshold {
+            if balance.is_zero() {
                 return Ok(None);
             }
             return self
-                .find_native_transfer(deposit_address, threshold, latest_block)
+                .find_native_transfer(deposit_address, latest_block)
                 .await;
         }
 
@@ -326,13 +377,17 @@ impl EvmClient {
             let decoded = log
                 .log_decode::<Transfer>()
                 .context("failed to decode ERC20 transfer log")?;
-            if decoded.inner.data.value < threshold {
+            if decoded.inner.data.value.is_zero() {
                 continue;
             }
             if let (Some(tx_hash), Some(block_number)) =
                 (decoded.transaction_hash, decoded.block_number)
             {
-                return Ok(Some((tx_hash, block_number)));
+                return Ok(Some((
+                    tx_hash,
+                    block_number,
+                    decoded.inner.data.value.to_string(),
+                )));
             }
         }
 
@@ -342,9 +397,8 @@ impl EvmClient {
     async fn find_native_transfer(
         &self,
         deposit_address: Address,
-        threshold: U256,
         latest_block: u64,
-    ) -> Result<Option<(B256, u64)>> {
+    ) -> Result<Option<(B256, u64, String)>> {
         for block_number in 0..=latest_block {
             let Some(block) = self
                 .provider
@@ -356,8 +410,8 @@ impl EvmClient {
                 continue;
             };
             for tx in block.transactions.into_transactions_vec() {
-                if tx.to() == Some(deposit_address) && tx.value() >= threshold {
-                    return Ok(Some((tx.tx_hash(), block_number)));
+                if tx.to() == Some(deposit_address) && !tx.value().is_zero() {
+                    return Ok(Some((tx.tx_hash(), block_number, tx.value().to_string())));
                 }
             }
         }
@@ -370,16 +424,22 @@ impl EvmClient {
         quote: &EvmTrackedQuote,
         tx_hash: B256,
         detected_block: u64,
+        lifecycle: DynLifecycle,
     ) -> Result<()> {
-        self.record_detected_deposit(quote, tx_hash, detected_block)
-            .await?;
-        Ok(())
+        let _ = detected_block;
+        lifecycle
+            .apply(LifecycleEvent::EvmDepositDetected {
+                correlation_id: quote.correlation_id,
+                tx_hash: format!("{tx_hash:#x}"),
+            })
+            .await
     }
 
     async fn handle_confirmed_deposit(
         &self,
         quote: &EvmTrackedQuote,
         latest_block: u64,
+        lifecycle: DynLifecycle,
     ) -> Result<()> {
         let record = self
             .store
@@ -407,106 +467,38 @@ impl EvmClient {
             return Ok(());
         }
 
-        let confirm_key = format!("evm_deposit_confirmed_{tx_hash_string}");
-        if self
-            .store
-            .record_idempotency_key(quote.correlation_id, &confirm_key)
-            .await
-            .context("failed to record EVM deposit confirmation idempotency key")?
-        {
-            self.store
-                .record_event(
-                    quote.correlation_id,
-                    Some("KNOWN_DEPOSIT_TX"),
-                    "PENDING_DEPOSIT",
-                    "EVM_DEPOSIT_CONFIRMED",
-                    None,
-                    Some(json!({ "txHash": tx_hash_string })),
-                )
+        let amount = if quote.origin_asset == "eth-anvil:eth" {
+            let transaction = self
+                .provider
+                .get_transaction_by_hash(tx_hash)
                 .await
-                .context("failed to record EVM deposit confirmation")?;
-        }
-
-        self.advance_to_processing_and_success(quote.correlation_id)
-            .await
-    }
-
-    async fn advance_to_processing_and_success(&self, correlation_id: Uuid) -> Result<()> {
-        let processing_key = format!("evm_processing_{correlation_id}");
-        if self
-            .store
-            .record_idempotency_key(correlation_id, &processing_key)
-            .await
-            .context("failed to record processing idempotency key")?
-        {
-            self.store
-                .record_event(
-                    correlation_id,
-                    Some("PENDING_DEPOSIT"),
-                    "PROCESSING",
-                    "EVM_RELEASE_INITIATED",
-                    None,
-                    None,
-                )
-                .await
-                .context("failed to record processing transition")?;
-        }
-        self.complete_processing_by_id(correlation_id).await
-    }
-
-    async fn complete_processing(&self, quote: &EvmTrackedQuote) -> Result<()> {
-        self.complete_processing_by_id(quote.correlation_id).await
-    }
-
-    async fn complete_processing_by_id(&self, correlation_id: Uuid) -> Result<()> {
-        let success_key = format!("evm_success_{correlation_id}");
-        if !self
-            .store
-            .record_idempotency_key(correlation_id, &success_key)
-            .await
-            .context("failed to record success idempotency key")?
-        {
-            return Ok(());
-        }
-
-        self.mock_miden_mint(correlation_id)
-            .await
-            .context("failed to complete Miden mint flow")?;
-        Ok(())
-    }
-
-    async fn mock_miden_mint(&self, correlation_id: Uuid) -> Result<String> {
-        if let Some(miden_client) = self.miden_client.as_ref() {
-            let miden_client = miden_client.clone();
-            let store = self.store.clone();
-            return tokio::task::spawn_blocking(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .context("failed to build tokio runtime for Miden mint")?;
-                runtime.block_on(async move {
-                    let bootstrap = store
-                        .get_miden_bootstrap()
-                        .await
-                        .context("failed to load Miden bootstrap state")?
-                        .ok_or_else(|| anyhow!("Miden bootstrap state is missing"))?;
-                    let bootstrap = bootstrap_state_from_record(&bootstrap)?;
-                    mint_quote_to_user(
-                        miden_client.as_ref(),
-                        store.clone(),
-                        &bootstrap,
-                        correlation_id,
-                    )
-                    .await
+                .context("failed to fetch detected native deposit transaction")?
+                .ok_or_else(|| anyhow!("deposit transaction {tx_hash_string} not found"))?;
+            transaction.value().to_string()
+        } else {
+            let deposit_address = Address::from_str(&quote.deposit_address)
+                .with_context(|| format!("invalid deposit address {}", quote.deposit_address))?;
+            receipt
+                .inner
+                .logs()
+                .iter()
+                .find_map(|log| {
+                    log.log_decode::<Transfer>()
+                        .ok()
+                        .filter(|decoded| decoded.inner.data.to == deposit_address)
+                        .map(|decoded| decoded.inner.data.value.to_string())
                 })
-            })
-            .await
-            .context("failed to join blocking Miden mint task")?;
-        }
+                .ok_or_else(|| anyhow!("failed to determine EVM token deposit amount"))?
+        };
 
-        let mint_future: Pin<Box<dyn Future<Output = Result<String>> + Send>> =
-            Box::pin(async move { Ok(format!("stub-miden-mint-{correlation_id}")) });
-        mint_future.await
+        lifecycle
+            .apply(LifecycleEvent::EvmDepositConfirmed {
+                correlation_id: quote.correlation_id,
+                tx_hash: tx_hash_string.clone(),
+                amount,
+            })
+            .await?;
+        lifecycle.settle(quote.correlation_id).await
     }
 }
 

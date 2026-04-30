@@ -1,13 +1,11 @@
-use axum::{Json, extract::State};
-use serde_json::json;
-
 use crate::{
     AppState,
     api::{errors::ApiError, status::empty_swap_details},
-    core::state::TxHashColumn,
+    core::lifecycle::LifecycleEvent,
     now_iso8601,
     types::{SubmitDepositTxRequest, SubmitDepositTxResponse, SwapStatus},
 };
+use axum::{Json, extract::State};
 
 pub(crate) async fn submit_deposit(
     State(state): State<AppState>,
@@ -20,36 +18,12 @@ pub(crate) async fn submit_deposit(
         .map_err(|error| ApiError::internal(error.to_string()))?
         .ok_or_else(|| ApiError::bad_request("deposit address not found"))?;
     let correlation_id = quote_record.correlation_id;
-    let inserted = state
-        .store
-        .record_idempotency_key(correlation_id, &request.tx_hash)
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-
-    if inserted {
-        state
-            .store
-            .append_tx_hash(
+    if let Some(lifecycle) = state.lifecycle.as_ref() {
+        lifecycle
+            .apply(LifecycleEvent::EvmDepositDetected {
                 correlation_id,
-                TxHashColumn::EvmDepositTxHashes,
-                &request.tx_hash,
-            )
-            .await
-            .map_err(|error| ApiError::internal(error.to_string()))?;
-        state
-            .store
-            .record_event(
-                correlation_id,
-                Some(&quote_record.status),
-                "KNOWN_DEPOSIT_TX",
-                "DEPOSIT_SUBMITTED",
-                None,
-                Some(json!({
-                    "txHash": request.tx_hash,
-                    "nearSenderAccount": request.near_sender_account,
-                    "memo": request.memo
-                })),
-            )
+                tx_hash: request.tx_hash.clone(),
+            })
             .await
             .map_err(|error| ApiError::internal(error.to_string()))?;
     }
