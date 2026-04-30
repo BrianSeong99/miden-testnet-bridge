@@ -70,15 +70,17 @@ Copy `.env.example` to `.env`, then override only what you need:
 cp .env.example .env
 ```
 
+The "Default" column is what the binary falls back to when the variable is unset. `.env.example` ships with developer-friendly localhost values for the host-mode dev path; container deployments rely on the binary fallbacks.
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgres://postgres:postgres@postgres:5432/miden_bridge` | Postgres DSN used by the bridge container. |
 | `MIDEN_RPC_URL` | `http://localhost:57291` | Miden RPC URL for host-side runs; Compose overrides this to `http://miden-node:57291` inside the bridge container. |
 | `MIDEN_STORE_DIR` | `./.miden-store` | Host-run Miden client store path; Compose overrides this to `/var/lib/bridge/miden-store`. |
 | `MIDEN_MASTER_SEED_HEX` | `0101010101010101010101010101010101010101010101010101010101010101` | 32-byte hex seed used to derive deterministic Miden accounts for bootstrap and outbound deposit accounts. |
-| `EVM_RPC_URL` | `http://localhost:8545` | Local Anvil RPC URL for host-side runs; Compose overrides this to `http://anvil:8545` inside the bridge container. |
+| `EVM_RPC_URL` | `http://host.docker.internal:8545` | Binary fallback for reaching a host-run Anvil node from containerized bridge runs; `.env.example` uses `http://localhost:8545` for host-mode development. |
 | `MASTER_MNEMONIC` | `abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about` | Deterministic master mnemonic used to derive per-quote EVM deposit addresses. |
-| `SOLVER_PRIVATE_KEY` | `0x59c6995e998f97a5a0044966f0945382dbb7d2745078b2336b91c60d50d6b6d7` | Solver EVM key used for releases and refunds on Anvil. |
+| `SOLVER_PRIVATE_KEY` | `replace-with-solver-private-key` | Binary fallback placeholder; set this explicitly in real runs. `.env.example` uses a local Anvil key for host-mode development. |
 | `EVM_CHAIN_ID` | `271828` | Chain ID expected from the local Anvil instance. |
 | `EVM_TOKEN_ADDRESSES_PATH` | `/state/token-addresses.json` | JSON file written by `anvil-init` that maps mock ERC-20 symbols to deployed token addresses. |
 | `BRIDGE_HTTP_PORT` | `8080` | Host port exposed by the bridge HTTP server. |
