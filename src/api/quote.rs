@@ -4,7 +4,10 @@ use uuid::Uuid;
 use crate::{
     AppState,
     api::errors::ApiError,
-    chains::evm::evm_quote_requires_deposit_address,
+    chains::{
+        evm::evm_quote_requires_deposit_address, miden::miden_quote_requires_deposit_address,
+        miden_deposit_account::derive_outbound_deposit_account,
+    },
     now_iso8601,
     types::{DepositMode, Quote, QuoteRequest, QuoteResponse},
 };
@@ -32,6 +35,7 @@ pub(crate) async fn quote(
     let correlation_id = Uuid::new_v4();
     let timestamp = now_iso8601();
     let mut deposit_derivation_path = None;
+    let mut miden_deposit_artifact = None;
     let deposit_address = if request.dry {
         None
     } else if evm_quote_requires_deposit_address(&request.origin_asset, &request.destination_asset)
@@ -46,6 +50,29 @@ pub(crate) async fn quote(
         } else {
             Some(format!("mock-{correlation_id}"))
         }
+    } else if miden_quote_requires_deposit_address(&request.origin_asset) {
+        let Some(miden_client) = state.miden_client.as_ref() else {
+            return Err(ApiError::internal(
+                "Miden client is not configured for outbound deposit accounts".to_owned(),
+            ));
+        };
+        let Some(master_seed) = state.miden_master_seed.as_ref() else {
+            return Err(ApiError::internal(
+                "Miden master seed is not configured for outbound deposit accounts".to_owned(),
+            ));
+        };
+        let (account, _secret_key, init_seed, auth_seed) =
+            derive_outbound_deposit_account(master_seed, correlation_id)
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+        miden_deposit_artifact = Some((
+            account.id().to_hex(),
+            format!(
+                "{}:{}",
+                alloy::hex::encode(init_seed),
+                alloy::hex::encode(auth_seed)
+            ),
+        ));
+        Some(miden_client.encode_basic_wallet_address(account.id()))
     } else {
         Some(format!("mock-{correlation_id}"))
     };
@@ -86,6 +113,13 @@ pub(crate) async fn quote(
             .map_err(|error| ApiError::internal(error.to_string()))?;
         if let (Some(evm), Some(derivation_path)) = (state.evm.as_ref(), deposit_derivation_path) {
             evm.persist_deposit_derivation_path(correlation_id, &derivation_path)
+                .await
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+        }
+        if let Some((account_id, seed_hex)) = miden_deposit_artifact {
+            state
+                .store
+                .set_miden_deposit_account(correlation_id, &account_id, &seed_hex)
                 .await
                 .map_err(|error| ApiError::internal(error.to_string()))?;
         }

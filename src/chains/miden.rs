@@ -6,7 +6,11 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use miden_client::{
-    Client, DebugMode, builder::ClientBuilder, keystore::FilesystemKeyStore, rpc::Endpoint,
+    Client, DebugMode,
+    account::{AccountId, Address, AddressInterface},
+    builder::ClientBuilder,
+    keystore::FilesystemKeyStore,
+    rpc::Endpoint,
 };
 use miden_client_sqlite_store::ClientBuilderSqliteExt;
 use tokio::{
@@ -23,6 +27,7 @@ pub trait MidenHealthCheck: Send + Sync {
     async fn tip_block_height(&self) -> Result<u32>;
 }
 
+#[derive(Clone)]
 pub struct MidenClient {
     endpoint: Endpoint,
     store_dir: PathBuf,
@@ -40,6 +45,36 @@ impl MidenClient {
             endpoint,
             store_dir: store_dir.to_path_buf(),
         })
+    }
+
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
+
+    pub fn network_id(&self) -> miden_client::address::NetworkId {
+        self.endpoint.to_network_id()
+    }
+
+    pub fn open_keystore(&self) -> Result<FilesystemKeyStore> {
+        let keystore_path = self.store_dir.join("keystore");
+        FilesystemKeyStore::new(keystore_path.clone()).with_context(|| {
+            format!(
+                "failed to initialize miden keystore at {}",
+                keystore_path.display()
+            )
+        })
+    }
+
+    pub async fn open(&self) -> Result<InnerClient> {
+        build_client(&self.endpoint, &self.store_dir).await
+    }
+
+    pub fn encode_basic_wallet_address(&self, account_id: AccountId) -> String {
+        Address::new(account_id)
+            .with_routing_parameters(miden_client::address::RoutingParameters::new(
+                AddressInterface::BasicWallet,
+            ))
+            .encode(self.network_id())
     }
 
     pub async fn sync_state(&self) -> Result<()> {
@@ -119,6 +154,62 @@ impl MidenClient {
         })
         .await
         .context("miden tip task join failure")?
+    }
+}
+
+pub fn parse_account_id(value: &str) -> Result<AccountId> {
+    if value.starts_with("0x") {
+        return AccountId::from_hex(value)
+            .map_err(|err| anyhow!("invalid Miden account id {value}: {err}"));
+    }
+
+    let (_, address) = Address::decode(value)
+        .map_err(|err| anyhow!("invalid Miden bech32 address {value}: {err}"))?;
+    match address.id() {
+        miden_client::address::AddressId::AccountId(account_id) => Ok(account_id),
+        _ => Err(anyhow!("address {value} is not an account ID address")),
+    }
+}
+
+pub fn is_miden_asset_id(asset_id: &str) -> bool {
+    asset_id.starts_with("miden-local:")
+}
+
+pub fn is_evm_asset_id(asset_id: &str) -> bool {
+    asset_id.starts_with("eth-anvil:")
+}
+
+pub fn miden_quote_requires_deposit_address(origin_asset: &str) -> bool {
+    is_miden_asset_id(origin_asset)
+}
+
+pub fn asset_symbol(asset_id: &str) -> Result<&'static str> {
+    match asset_id {
+        "miden-local:eth" | "eth-anvil:eth" => Ok("ETH"),
+        "miden-local:usdc" | "eth-anvil:usdc" => Ok("USDC"),
+        "miden-local:usdt" | "eth-anvil:usdt" => Ok("USDT"),
+        "miden-local:btc" | "eth-anvil:btc" => Ok("BTC"),
+        _ => Err(anyhow!("unsupported asset id {asset_id}")),
+    }
+}
+
+pub fn asset_decimals(asset_id: &str) -> Result<u8> {
+    match asset_id {
+        "miden-local:eth" | "eth-anvil:eth" => Ok(18),
+        "miden-local:usdc" | "eth-anvil:usdc" => Ok(6),
+        "miden-local:usdt" | "eth-anvil:usdt" => Ok(6),
+        "miden-local:btc" | "eth-anvil:btc" => Ok(8),
+        _ => Err(anyhow!("unsupported asset id {asset_id}")),
+    }
+}
+
+pub fn solver_liquidity_for_asset(asset_id: &str) -> Result<u64> {
+    match asset_id {
+        "miden-local:eth" | "eth-anvil:eth" => Ok(10_000_000_000_000_000_000),
+        "miden-local:usdc" | "eth-anvil:usdc" => Ok(1_000_000_000_000),
+        "miden-local:usdt" | "eth-anvil:usdt" => Ok(1_000_000_000_000),
+        "miden-local:btc" | "eth-anvil:btc" => Ok(10_000_000_000),
+        _ => Err(anyhow!("unsupported asset id {asset_id}")),
     }
 }
 

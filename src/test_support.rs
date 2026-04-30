@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     core::state::{
-        DynStateStore, EvmTrackedQuote, QuoteRecord, StateStore, StateStoreError, TxHashColumn,
+        DynStateStore, EvmTrackedQuote, MidenBootstrapRecord, MidenTrackedQuote, QuoteRecord,
+        StateStore, StateStoreError, TxHashColumn,
     },
     types::{QuoteRequest, QuoteResponse},
 };
@@ -16,6 +17,7 @@ use crate::{
 #[derive(Default)]
 struct MemoryStoreState {
     quotes: HashMap<(String, Option<String>), QuoteRecord>,
+    miden_bootstrap: Option<MidenBootstrapRecord>,
 }
 
 #[derive(Clone)]
@@ -65,6 +67,8 @@ impl StateStore for MemoryStateStore {
                 status: "PENDING_DEPOSIT".to_owned(),
                 updated_at: OffsetDateTime::now_utc(),
                 evm_deposit_derivation_path: None,
+                miden_deposit_account_id: None,
+                miden_deposit_seed_hex: None,
                 evm_deposit_tx_hashes: Vec::new(),
                 evm_release_tx_hashes: Vec::new(),
                 miden_mint_tx_ids: Vec::new(),
@@ -91,6 +95,20 @@ impl StateStore for MemoryStateStore {
             .await
             .quotes
             .get(&(address.to_owned(), memo.map(ToOwned::to_owned)))
+            .cloned())
+    }
+
+    async fn get_quote_by_correlation_id(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Option<QuoteRecord>, StateStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .quotes
+            .values()
+            .find(|quote| quote.correlation_id == correlation_id)
             .cloned())
     }
 
@@ -176,6 +194,24 @@ impl StateStore for MemoryStateStore {
         Ok(())
     }
 
+    async fn set_miden_deposit_account(
+        &self,
+        correlation_id: Uuid,
+        account_id: &str,
+        seed_hex: &str,
+    ) -> Result<(), StateStoreError> {
+        for quote in self.state.lock().await.quotes.values_mut() {
+            if quote.correlation_id == correlation_id {
+                quote.updated_at = OffsetDateTime::now_utc();
+                quote.miden_deposit_account_id = Some(account_id.to_owned());
+                quote.miden_deposit_seed_hex = Some(seed_hex.to_owned());
+                return Ok(());
+            }
+        }
+
+        Ok(())
+    }
+
     async fn list_evm_tracked_quotes(&self) -> Result<Vec<EvmTrackedQuote>, StateStoreError> {
         Ok(self
             .state
@@ -197,6 +233,56 @@ impl StateStore for MemoryStateStore {
                 evm_deposit_derivation_path: quote.evm_deposit_derivation_path.clone(),
             })
             .collect())
+    }
+
+    async fn list_miden_tracked_quotes(&self) -> Result<Vec<MidenTrackedQuote>, StateStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .quotes
+            .values()
+            .filter_map(|quote| {
+                let account_id = quote.miden_deposit_account_id.clone()?;
+                let seed_hex = quote.miden_deposit_seed_hex.clone()?;
+                if !matches!(
+                    quote.status.as_str(),
+                    "PENDING_DEPOSIT" | "KNOWN_DEPOSIT_TX" | "PROCESSING"
+                ) {
+                    return None;
+                }
+                Some(MidenTrackedQuote {
+                    correlation_id: quote.correlation_id,
+                    deposit_address: quote
+                        .quote_response
+                        .quote
+                        .deposit_address
+                        .clone()
+                        .expect("memory quote should have deposit address"),
+                    origin_asset: quote.quote_request.origin_asset.clone(),
+                    destination_asset: quote.quote_request.destination_asset.clone(),
+                    recipient: quote.quote_request.recipient.clone(),
+                    amount_in: quote.quote_response.quote.amount_in.clone(),
+                    status: quote.status.clone(),
+                    miden_deposit_account_id: account_id,
+                    miden_deposit_seed_hex: seed_hex,
+                    evm_release_tx_hashes: quote.evm_release_tx_hashes.clone(),
+                    miden_consume_tx_ids: quote.miden_consume_tx_ids.clone(),
+                })
+            })
+            .collect())
+    }
+
+    async fn get_miden_bootstrap(&self) -> Result<Option<MidenBootstrapRecord>, StateStoreError> {
+        Ok(self.state.lock().await.miden_bootstrap.clone())
+    }
+
+    async fn upsert_miden_bootstrap(
+        &self,
+        record: &MidenBootstrapRecord,
+    ) -> Result<(), StateStoreError> {
+        self.state.lock().await.miden_bootstrap = Some(record.clone());
+        Ok(())
     }
 
     async fn ping(&self) -> Result<(), StateStoreError> {
