@@ -15,6 +15,7 @@ use miden_testnet_bridge::{
         miden_outbound::poll_outbound_deposits,
     },
     core::{
+        lifecycle::{DefaultLifecycle, resume_in_flight_quotes},
         pricer::CoinGeckoPricer,
         state::{PostgresStateStore, connect_pool},
     },
@@ -134,6 +135,7 @@ async fn main() -> Result<()> {
     let miden_master_seed = parse_master_seed_hex(&config.miden_master_seed_hex)?;
     let miden = Arc::new(MidenClient::new(&config.miden_rpc_url, &config.miden_store_dir).await?);
     bootstrap_miden(miden.as_ref(), store.clone(), &miden_master_seed).await?;
+    let pricer = Arc::new(CoinGeckoPricer::new());
     let evm = Arc::new(
         EvmClient::new(
             store.clone(),
@@ -147,10 +149,18 @@ async fn main() -> Result<()> {
         )?
         .with_miden_client(miden.clone()),
     );
-    tokio::spawn(evm.clone().watch_deposits());
+    let lifecycle = Arc::new(DefaultLifecycle::new(
+        store.clone(),
+        pricer.clone(),
+        evm.clone(),
+        miden.clone(),
+    ));
+    resume_in_flight_quotes(store.clone(), lifecycle.clone()).await?;
+    tokio::spawn(evm.clone().watch_deposits(lifecycle.clone()));
     let outbound_miden = miden.clone();
     let outbound_store = store.clone();
     let outbound_evm = evm.clone();
+    let outbound_lifecycle = lifecycle.clone();
     tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -162,12 +172,13 @@ async fn main() -> Result<()> {
                 outbound_store,
                 outbound_evm,
                 miden_master_seed,
+                outbound_lifecycle,
             ))
             .expect("outbound poller");
     });
 
-    let pricer = Arc::new(CoinGeckoPricer::new());
-    let state = AppState::with_clients(store, pricer, evm, miden, miden_master_seed);
+    let state = AppState::with_clients(store, pricer, evm, miden, miden_master_seed)
+        .with_lifecycle(lifecycle);
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await

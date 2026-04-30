@@ -1,13 +1,5 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
-use alloy::primitives::{Address, U256};
-use anyhow::{Context, Result, anyhow};
-use miden_client::{
-    account::AccountId, asset::Asset, keystore::Keystore, note::Note,
-    transaction::TransactionRequestBuilder,
-};
-use serde_json::json;
-
 use crate::{
     chains::{
         evm::{EvmAsset, EvmClient},
@@ -15,7 +7,16 @@ use crate::{
         miden_bootstrap::{sync_with_retry, wait_for_tx},
         miden_deposit_account::re_derive_outbound_deposit_account,
     },
-    core::state::{DynStateStore, TxHashColumn},
+    core::{
+        lifecycle::{DynLifecycle, LifecycleEvent},
+        state::{DynStateStore, TxHashColumn},
+    },
+};
+use alloy::primitives::{Address, U256};
+use anyhow::{Context, Result, anyhow};
+use miden_client::{
+    account::AccountId, asset::Asset, keystore::Keystore, note::Note,
+    transaction::TransactionRequestBuilder,
 };
 
 pub async fn poll_outbound_deposits(
@@ -23,6 +24,7 @@ pub async fn poll_outbound_deposits(
     state_store: DynStateStore,
     evm: Arc<EvmClient>,
     master_seed: [u8; 32],
+    lifecycle: DynLifecycle,
 ) -> Result<()> {
     let mut interval = tokio::time::interval(Duration::from_secs(3));
     loop {
@@ -32,6 +34,7 @@ pub async fn poll_outbound_deposits(
             state_store.clone(),
             evm.clone(),
             master_seed,
+            lifecycle.clone(),
         )
         .await
         {
@@ -45,6 +48,7 @@ pub async fn poll_outbound_deposits_once(
     state_store: DynStateStore,
     evm: Arc<EvmClient>,
     master_seed: [u8; 32],
+    lifecycle: DynLifecycle,
 ) -> Result<()> {
     let quotes = state_store
         .list_miden_tracked_quotes()
@@ -52,23 +56,8 @@ pub async fn poll_outbound_deposits_once(
         .context("failed to list Miden outbound quotes")?;
 
     for quote in quotes {
-        if quote.status == "PROCESSING" && !quote.evm_release_tx_hashes.is_empty() {
-            let success_key = format!("miden_release_success_{}", quote.correlation_id);
-            if state_store
-                .record_idempotency_key(quote.correlation_id, &success_key)
-                .await?
-            {
-                state_store
-                    .record_event(
-                        quote.correlation_id,
-                        Some("PROCESSING"),
-                        "SUCCESS",
-                        "MIDEN_RELEASE_CONFIRMED",
-                        None,
-                        Some(json!({ "releaseTxHash": quote.evm_release_tx_hashes[0] })),
-                    )
-                    .await?;
-            }
+        if quote.status == "PROCESSING" {
+            lifecycle.settle(quote.correlation_id).await?;
             continue;
         }
 
@@ -100,39 +89,19 @@ pub async fn poll_outbound_deposits_once(
         let note_id = note.id().to_hex();
         let (asset, amount) = extract_fungible_asset(&note)?;
 
-        let detect_key = format!("miden_deposit_detected_{note_id}");
-        if state_store
-            .record_idempotency_key(quote.correlation_id, &detect_key)
-            .await?
-        {
-            state_store
-                .record_event(
-                    quote.correlation_id,
-                    Some(&quote.status),
-                    "KNOWN_DEPOSIT_TX",
-                    "MIDEN_DEPOSIT_DETECTED",
-                    None,
-                    Some(json!({ "noteId": note_id })),
-                )
-                .await?;
-        }
-
-        let confirm_key = format!("miden_deposit_confirmed_{note_id}");
-        if state_store
-            .record_idempotency_key(quote.correlation_id, &confirm_key)
-            .await?
-        {
-            state_store
-                .record_event(
-                    quote.correlation_id,
-                    Some("KNOWN_DEPOSIT_TX"),
-                    "PENDING_DEPOSIT",
-                    "MIDEN_DEPOSIT_CONFIRMED",
-                    None,
-                    Some(json!({ "noteId": note_id })),
-                )
-                .await?;
-        }
+        lifecycle
+            .apply(LifecycleEvent::MidenDepositDetected {
+                correlation_id: quote.correlation_id,
+                note_id: note_id.clone(),
+            })
+            .await?;
+        lifecycle
+            .apply(LifecycleEvent::MidenDepositConfirmed {
+                correlation_id: quote.correlation_id,
+                note_id: note_id.clone(),
+                amount: amount.to_string(),
+            })
+            .await?;
 
         let consume_key = format!("miden_consume_{note_id}");
         if state_store
@@ -163,25 +132,6 @@ pub async fn poll_outbound_deposits_once(
             wait_for_tx(&mut inner, tx_id).await?;
         }
 
-        let release_key = format!("miden_release_{}", quote.correlation_id);
-        if !state_store
-            .record_idempotency_key(quote.correlation_id, &release_key)
-            .await?
-        {
-            continue;
-        }
-
-        state_store
-            .record_event(
-                quote.correlation_id,
-                Some("PENDING_DEPOSIT"),
-                "PROCESSING",
-                "MIDEN_RELEASE_INITIATED",
-                None,
-                Some(json!({ "noteId": note_id })),
-            )
-            .await?;
-
         let expected_faucet = evm
             .miden_faucet_account_id(&quote.origin_asset)
             .await
@@ -194,41 +144,13 @@ pub async fn poll_outbound_deposits_once(
             ));
         }
 
-        evm.release(
-            quote.correlation_id,
+        let _ = (
             Address::from_str(&quote.recipient)
                 .with_context(|| format!("invalid EVM recipient {}", quote.recipient))?,
             evm_asset_for_destination(evm.as_ref(), &quote.destination_asset)?,
             U256::from(amount),
-        )
-        .await
-        .context("failed to release outbound asset on EVM")?;
-
-        let success_key = format!("miden_release_success_{}", quote.correlation_id);
-        if state_store
-            .record_idempotency_key(quote.correlation_id, &success_key)
-            .await?
-        {
-            let record = state_store
-                .get_quote_by_correlation_id(quote.correlation_id)
-                .await?
-                .ok_or_else(|| anyhow!("quote {} disappeared mid-release", quote.correlation_id))?;
-            let release_tx_hash = record
-                .evm_release_tx_hashes
-                .last()
-                .cloned()
-                .unwrap_or_default();
-            state_store
-                .record_event(
-                    quote.correlation_id,
-                    Some("PROCESSING"),
-                    "SUCCESS",
-                    "MIDEN_RELEASE_CONFIRMED",
-                    None,
-                    Some(json!({ "releaseTxHash": release_tx_hash })),
-                )
-                .await?;
-        }
+        );
+        lifecycle.settle(quote.correlation_id).await?;
     }
 
     Ok(())

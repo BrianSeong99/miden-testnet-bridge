@@ -31,7 +31,7 @@ use miden_testnet_bridge::{
         miden_inbound::mint_to_user,
         miden_outbound::{parse_persisted_miden_seed_hex, poll_outbound_deposits_once},
     },
-    core::pricer::MockPricer,
+    core::{lifecycle::DefaultLifecycle, pricer::MockPricer},
     test_support::memory_state,
 };
 use rand::SeedableRng;
@@ -268,9 +268,21 @@ async fn outbound_flow_consumes_note_and_releases_on_evm() {
     let usdc = Address::from_str(token_file.usdc.as_deref().expect("USDC address")).unwrap();
     let balance_before =
         erc20_balance(&std::env::var("EVM_RPC_URL").unwrap(), usdc, recipient).await;
-    poll_outbound_deposits_once(miden.clone(), store.clone(), evm.clone(), TEST_MASTER_SEED)
-        .await
-        .expect("poll outbound deposits");
+    let lifecycle = Arc::new(DefaultLifecycle::new(
+        store.clone(),
+        Arc::new(MockPricer),
+        evm.clone(),
+        miden.clone(),
+    ));
+    poll_outbound_deposits_once(
+        miden.clone(),
+        store.clone(),
+        evm.clone(),
+        TEST_MASTER_SEED,
+        lifecycle,
+    )
+    .await
+    .expect("poll outbound deposits");
     let balance_after =
         erc20_balance(&std::env::var("EVM_RPC_URL").unwrap(), usdc, recipient).await;
     let updated_quote = store

@@ -9,6 +9,8 @@ use alloy::{
     sol,
     sol_types::SolCall,
 };
+use anyhow::Result;
+use async_trait::async_trait;
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
@@ -19,6 +21,7 @@ use miden_testnet_bridge::{
         EvmAsset, EvmClient, EvmConfig, derivation_path, derive_address_from_mnemonic,
         load_token_address_file,
     },
+    core::lifecycle::{DynLifecycle, Lifecycle, LifecycleEvent},
     test_support::memory_state,
     types::{QuoteResponse, StatusResponse},
 };
@@ -72,9 +75,12 @@ impl LiveHarness {
             )
             .expect("EVM client"),
         );
-        tokio::spawn(evm.clone().watch_deposits());
+        let lifecycle: DynLifecycle = Arc::new(TestLifecycle {
+            store: store.clone(),
+        });
+        tokio::spawn(evm.clone().watch_deposits(lifecycle.clone()));
 
-        let app = app(AppState::with_evm(store.clone(), evm.clone()));
+        let app = app(AppState::with_evm(store.clone(), evm.clone()).with_lifecycle(lifecycle));
 
         Some(Self {
             rpc_url,
@@ -138,6 +144,105 @@ impl LiveHarness {
             .await
             .expect("status body");
         serde_json::from_slice(&body).expect("status json")
+    }
+}
+
+struct TestLifecycle {
+    store: miden_testnet_bridge::core::state::DynStateStore,
+}
+
+#[async_trait]
+impl Lifecycle for TestLifecycle {
+    async fn apply(&self, event: LifecycleEvent) -> Result<()> {
+        match event {
+            LifecycleEvent::EvmDepositDetected {
+                correlation_id,
+                tx_hash,
+            } => {
+                self.store
+                    .append_tx_hash(
+                        correlation_id,
+                        miden_testnet_bridge::core::state::TxHashColumn::EvmDepositTxHashes,
+                        &tx_hash,
+                    )
+                    .await?;
+                self.store
+                    .record_event(
+                        correlation_id,
+                        Some("PENDING_DEPOSIT"),
+                        "KNOWN_DEPOSIT_TX",
+                        "EVM_DEPOSIT_DETECTED",
+                        None,
+                        None,
+                    )
+                    .await?;
+            }
+            LifecycleEvent::EvmDepositConfirmed { correlation_id, .. } => {
+                self.store
+                    .record_event(
+                        correlation_id,
+                        Some("KNOWN_DEPOSIT_TX"),
+                        "PENDING_DEPOSIT",
+                        "EVM_DEPOSIT_CONFIRMED",
+                        None,
+                        None,
+                    )
+                    .await?;
+            }
+            LifecycleEvent::SettlementSucceeded {
+                correlation_id,
+                tx_hash,
+            } => {
+                self.store
+                    .append_tx_hash(
+                        correlation_id,
+                        miden_testnet_bridge::core::state::TxHashColumn::MidenMintTxIds,
+                        &tx_hash,
+                    )
+                    .await?;
+                self.store
+                    .record_event(
+                        correlation_id,
+                        Some("PROCESSING"),
+                        "SUCCESS",
+                        "SETTLEMENT_SUCCEEDED",
+                        None,
+                        None,
+                    )
+                    .await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn settle(&self, correlation_id: uuid::Uuid) -> Result<()> {
+        let record = self
+            .store
+            .get_quote_by_correlation_id(correlation_id)
+            .await?
+            .expect("quote record");
+        if record.status != "PROCESSING" {
+            self.store
+                .record_event(
+                    correlation_id,
+                    Some("PENDING_DEPOSIT"),
+                    "PROCESSING",
+                    "SETTLEMENT_INITIATED",
+                    None,
+                    None,
+                )
+                .await?;
+        }
+        self.apply(LifecycleEvent::SettlementSucceeded {
+            correlation_id,
+            tx_hash: format!("stub-miden-mint-{correlation_id}"),
+        })
+        .await
+    }
+
+    async fn refund(&self, _correlation_id: uuid::Uuid) -> Result<()> {
+        Ok(())
     }
 }
 
