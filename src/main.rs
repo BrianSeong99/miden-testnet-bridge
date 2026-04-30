@@ -1,9 +1,17 @@
-use std::{env, net::SocketAddr, path::Path, sync::Arc};
+use std::{
+    env,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use miden_testnet_bridge::{
     AppState, LogFormat, app, arc_store,
-    chains::evm::{EvmClient, EvmConfig, token_addresses_path_from_env},
+    chains::{
+        evm::{EvmClient, EvmConfig, token_addresses_path_from_env},
+        miden::MidenClient,
+    },
     core::state::{PostgresStateStore, connect_pool},
     init_tracing,
 };
@@ -14,6 +22,7 @@ use tracing::info;
 struct Config {
     database_url: String,
     miden_rpc_url: String,
+    miden_store_dir: PathBuf,
     evm_rpc_url: String,
     master_mnemonic: String,
     solver_private_key: String,
@@ -40,7 +49,11 @@ impl Config {
                 "postgres://postgres:postgres@postgres:5432/miden_bridge".to_owned()
             }),
             miden_rpc_url: env::var("MIDEN_RPC_URL")
-                .unwrap_or_else(|_| "http://host.docker.internal:57291".to_owned()),
+                .unwrap_or_else(|_| "http://localhost:57291".to_owned()),
+            miden_store_dir: PathBuf::from(
+                env::var("MIDEN_STORE_DIR")
+                    .unwrap_or_else(|_| "./.miden-store".to_owned()),
+            ),
             evm_rpc_url: env::var("EVM_RPC_URL")
                 .unwrap_or_else(|_| "http://host.docker.internal:8545".to_owned()),
             master_mnemonic: env::var("MASTER_MNEMONIC")
@@ -101,6 +114,7 @@ async fn main() -> Result<()> {
         .context("failed to run migrations")?;
 
     let store = arc_store(PostgresStateStore::new(pool));
+    let miden = Arc::new(MidenClient::new(&config.miden_rpc_url, &config.miden_store_dir).await?);
     let evm = Arc::new(EvmClient::new(
         store.clone(),
         EvmConfig {
@@ -113,7 +127,7 @@ async fn main() -> Result<()> {
     )?);
     tokio::spawn(evm.clone().watch_deposits());
 
-    let state = AppState::with_evm(store, evm);
+    let state = AppState::with_clients(store, evm, miden);
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await

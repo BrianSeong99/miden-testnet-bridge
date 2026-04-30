@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
 };
 use chains::evm::EvmClient;
+use chains::miden::MidenHealthCheck;
 use time::OffsetDateTime;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -20,17 +21,35 @@ use crate::core::state::DynStateStore;
 pub struct AppState {
     pub store: DynStateStore,
     pub evm: Option<Arc<EvmClient>>,
+    pub miden: Option<Arc<dyn MidenHealthCheck>>,
 }
 
 impl AppState {
     pub fn new(store: DynStateStore) -> Self {
-        Self { store, evm: None }
+        Self {
+            store,
+            evm: None,
+            miden: None,
+        }
     }
 
     pub fn with_evm(store: DynStateStore, evm: Arc<EvmClient>) -> Self {
         Self {
             store,
             evm: Some(evm),
+            miden: None,
+        }
+    }
+
+    pub fn with_clients(
+        store: DynStateStore,
+        evm: Arc<EvmClient>,
+        miden: Arc<dyn MidenHealthCheck>,
+    ) -> Self {
+        Self {
+            store,
+            evm: Some(evm),
+            miden: Some(miden),
         }
     }
 }
