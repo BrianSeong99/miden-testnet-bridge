@@ -4,12 +4,13 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use chains::evm::EvmClient;
 use time::OffsetDateTime;
 use tracing_subscriber::{EnvFilter, fmt};
 
 pub mod api;
+pub mod chains;
 pub mod core;
-#[cfg(test)]
 pub mod test_support;
 pub mod types;
 
@@ -18,11 +19,19 @@ use crate::core::state::DynStateStore;
 #[derive(Clone)]
 pub struct AppState {
     pub store: DynStateStore,
+    pub evm: Option<Arc<EvmClient>>,
 }
 
 impl AppState {
     pub fn new(store: DynStateStore) -> Self {
-        Self { store }
+        Self { store, evm: None }
+    }
+
+    pub fn with_evm(store: DynStateStore, evm: Arc<EvmClient>) -> Self {
+        Self {
+            store,
+            evm: Some(evm),
+        }
     }
 }
 

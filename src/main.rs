@@ -1,8 +1,9 @@
-use std::{env, net::SocketAddr, path::Path};
+use std::{env, net::SocketAddr, path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
 use miden_testnet_bridge::{
     AppState, LogFormat, app, arc_store,
+    chains::evm::{EvmClient, EvmConfig, token_addresses_path_from_env},
     core::state::{PostgresStateStore, connect_pool},
     init_tracing,
 };
@@ -16,6 +17,7 @@ struct Config {
     evm_rpc_url: String,
     master_mnemonic: String,
     solver_private_key: String,
+    evm_chain_id: u64,
     http_port: u16,
     rust_log: String,
     log_format: LogFormat,
@@ -42,9 +44,16 @@ impl Config {
             evm_rpc_url: env::var("EVM_RPC_URL")
                 .unwrap_or_else(|_| "http://host.docker.internal:8545".to_owned()),
             master_mnemonic: env::var("MASTER_MNEMONIC")
-                .unwrap_or_else(|_| "replace-with-master-mnemonic".to_owned()),
+                .unwrap_or_else(|_| {
+                    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                        .to_owned()
+                }),
             solver_private_key: env::var("SOLVER_PRIVATE_KEY")
                 .unwrap_or_else(|_| "replace-with-solver-private-key".to_owned()),
+            evm_chain_id: env::var("EVM_CHAIN_ID")
+                .unwrap_or_else(|_| "271828".to_owned())
+                .parse()
+                .context("EVM_CHAIN_ID must be a valid u64")?,
             http_port: env::var("BRIDGE_HTTP_PORT")
                 .unwrap_or_else(|_| "8080".to_owned())
                 .parse()
@@ -91,7 +100,20 @@ async fn main() -> Result<()> {
         .await
         .context("failed to run migrations")?;
 
-    let state = AppState::new(arc_store(PostgresStateStore::new(pool)));
+    let store = arc_store(PostgresStateStore::new(pool));
+    let evm = Arc::new(EvmClient::new(
+        store.clone(),
+        EvmConfig {
+            rpc_url: config.evm_rpc_url.clone(),
+            master_mnemonic: config.master_mnemonic.clone(),
+            solver_private_key: config.solver_private_key.clone(),
+            token_addresses_path: token_addresses_path_from_env(),
+            chain_id: config.evm_chain_id,
+        },
+    )?);
+    tokio::spawn(evm.clone().watch_deposits());
+
+    let state = AppState::with_evm(store, evm);
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await

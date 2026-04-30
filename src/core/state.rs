@@ -29,8 +29,10 @@ impl PostgresStateStore {
 pub struct QuoteRecord {
     pub correlation_id: Uuid,
     pub quote_response: QuoteResponse,
+    pub quote_request: QuoteRequest,
     pub status: String,
     pub updated_at: OffsetDateTime,
+    pub evm_deposit_derivation_path: Option<String>,
     pub evm_deposit_tx_hashes: Vec<String>,
     pub evm_release_tx_hashes: Vec<String>,
     pub miden_mint_tx_ids: Vec<String>,
@@ -40,6 +42,16 @@ pub struct QuoteRecord {
     pub intent_hashes: Vec<String>,
     pub near_tx_hashes: Vec<String>,
     pub idempotency_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvmTrackedQuote {
+    pub correlation_id: Uuid,
+    pub deposit_address: String,
+    pub origin_asset: String,
+    pub amount_in: String,
+    pub status: String,
+    pub evm_deposit_derivation_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +139,14 @@ pub trait StateStore: Send + Sync {
         column: TxHashColumn,
         hash: &str,
     ) -> Result<(), StateStoreError>;
+
+    async fn set_evm_deposit_derivation_path(
+        &self,
+        correlation_id: Uuid,
+        derivation_path: &str,
+    ) -> Result<(), StateStoreError>;
+
+    async fn list_evm_tracked_quotes(&self) -> Result<Vec<EvmTrackedQuote>, StateStoreError>;
 
     async fn ping(&self) -> Result<(), StateStoreError>;
 }
@@ -216,9 +236,11 @@ impl StateStore for PostgresStateStore {
             r#"
             SELECT
                 q.correlation_id,
+                q.quote_request_json,
                 q.quote_response_json,
                 q.status,
                 q.updated_at,
+                c.evm_deposit_derivation_path,
                 c.evm_deposit_tx_hashes,
                 c.evm_release_tx_hashes,
                 c.miden_mint_tx_ids,
@@ -357,6 +379,63 @@ impl StateStore for PostgresStateStore {
         Ok(())
     }
 
+    async fn set_evm_deposit_derivation_path(
+        &self,
+        correlation_id: Uuid,
+        derivation_path: &str,
+    ) -> Result<(), StateStoreError> {
+        query::<sqlx_postgres::Postgres>(
+            r#"
+            UPDATE chain_artifacts
+            SET evm_deposit_derivation_path = $2,
+                updated_at = NOW()
+            WHERE correlation_id = $1
+            "#,
+        )
+        .bind(correlation_id)
+        .bind(derivation_path)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_evm_tracked_quotes(&self) -> Result<Vec<EvmTrackedQuote>, StateStoreError> {
+        let rows = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT
+                q.correlation_id,
+                q.deposit_address,
+                q.quote_request_json,
+                q.quote_response_json,
+                q.status,
+                c.evm_deposit_derivation_path
+            FROM quotes q
+            INNER JOIN chain_artifacts c ON c.correlation_id = q.correlation_id
+            WHERE q.status IN ('PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING')
+            ORDER BY q.created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let request: QuoteRequest =
+                    serde_json::from_value(row.try_get("quote_request_json")?)?;
+                let response: QuoteResponse =
+                    serde_json::from_value(row.try_get("quote_response_json")?)?;
+                Ok(EvmTrackedQuote {
+                    correlation_id: row.try_get("correlation_id")?,
+                    deposit_address: row.try_get("deposit_address")?,
+                    origin_asset: request.origin_asset,
+                    amount_in: response.quote.amount_in,
+                    status: row.try_get("status")?,
+                    evm_deposit_derivation_path: row.try_get("evm_deposit_derivation_path")?,
+                })
+            })
+            .collect()
+    }
+
     async fn ping(&self) -> Result<(), StateStoreError> {
         query::<sqlx_postgres::Postgres>("SELECT 1")
             .execute(&self.pool)
@@ -370,9 +449,11 @@ pub type DynStateStore = Arc<dyn StateStore>;
 fn map_quote_record(row: PgRow) -> Result<QuoteRecord, StateStoreError> {
     Ok(QuoteRecord {
         correlation_id: row.try_get("correlation_id")?,
+        quote_request: serde_json::from_value(row.try_get("quote_request_json")?)?,
         quote_response: serde_json::from_value(row.try_get("quote_response_json")?)?,
         status: row.try_get("status")?,
         updated_at: row.try_get("updated_at")?,
+        evm_deposit_derivation_path: row.try_get("evm_deposit_derivation_path")?,
         evm_deposit_tx_hashes: jsonb_array_to_vec(&row, "evm_deposit_tx_hashes")?,
         evm_release_tx_hashes: jsonb_array_to_vec(&row, "evm_release_tx_hashes")?,
         miden_mint_tx_ids: jsonb_array_to_vec(&row, "miden_mint_tx_ids")?,
