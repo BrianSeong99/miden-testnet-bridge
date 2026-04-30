@@ -7,6 +7,8 @@ docker run --rm \
   -v "$(pwd)":/work \
   -v miden-bridge-cargo-registry:/usr/local/cargo/registry \
   -v miden-bridge-target:/work/target \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e DOCKER_HOST="${DOCKER_HOST:-unix:///var/run/docker.sock}" \
   -w /work \
   rust:1.93-slim \
   bash -c "

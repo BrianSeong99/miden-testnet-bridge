@@ -1,8 +1,10 @@
 use axum::{Json, extract::State};
+use serde_json::json;
 
 use crate::{
     AppState,
     api::{errors::ApiError, status::empty_swap_details},
+    core::state::TxHashColumn,
     now_iso8601,
     types::{SubmitDepositTxRequest, SubmitDepositTxResponse, SwapStatus},
 };
@@ -11,24 +13,50 @@ pub(crate) async fn submit_deposit(
     State(state): State<AppState>,
     Json(request): Json<SubmitDepositTxRequest>,
 ) -> Result<Json<SubmitDepositTxResponse>, ApiError> {
-    state
-        .deposit_submissions
-        .write()
+    let quote_record = state
+        .store
+        .get_quote_by_deposit(&request.deposit_address, request.memo.as_deref())
         .await
-        .push(request.clone());
-
-    let key = (request.deposit_address, request.memo);
-    let quote_response = state
-        .quotes
-        .read()
-        .await
-        .get(&key)
-        .cloned()
+        .map_err(|error| ApiError::internal(error.to_string()))?
         .ok_or_else(|| ApiError::bad_request("deposit address not found"))?;
+    let correlation_id = quote_record.correlation_id;
+    let inserted = state
+        .store
+        .record_idempotency_key(correlation_id, &request.tx_hash)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    if inserted {
+        state
+            .store
+            .append_tx_hash(
+                correlation_id,
+                TxHashColumn::EvmDepositTxHashes,
+                &request.tx_hash,
+            )
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        state
+            .store
+            .record_event(
+                correlation_id,
+                Some(&quote_record.status),
+                "KNOWN_DEPOSIT_TX",
+                "DEPOSIT_SUBMITTED",
+                None,
+                Some(json!({
+                    "txHash": request.tx_hash,
+                    "nearSenderAccount": request.near_sender_account,
+                    "memo": request.memo
+                })),
+            )
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+    }
 
     Ok(Json(SubmitDepositTxResponse {
-        correlation_id: quote_response.correlation_id.clone(),
-        quote_response,
+        correlation_id: correlation_id.to_string(),
+        quote_response: quote_record.quote_response,
         status: SwapStatus::KnownDepositTx,
         updated_at: now_iso8601(),
         swap_details: empty_swap_details(),
@@ -43,11 +71,11 @@ mod tests {
     };
     use tower::ServiceExt;
 
-    use crate::{AppState, app};
+    use crate::{AppState, app, test_support::memory_state};
 
     #[tokio::test]
     async fn returns_ok_not_not_implemented() {
-        let app = app(AppState::default());
+        let app = app(AppState::new(memory_state()));
         let quote_response = app
             .clone()
             .oneshot(

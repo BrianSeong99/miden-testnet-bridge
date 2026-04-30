@@ -12,6 +12,8 @@ pub enum ApiError {
     BadRequest { message: String },
     #[error("{message}")]
     NotFound { message: String },
+    #[error("{message}")]
+    Internal { message: String },
 }
 
 impl ApiError {
@@ -26,6 +28,12 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal {
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -33,6 +41,7 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             Self::BadRequest { message } => (StatusCode::BAD_REQUEST, message),
             Self::NotFound { message } => (StatusCode::NOT_FOUND, message),
+            Self::Internal { message } => (StatusCode::INTERNAL_SERVER_ERROR, message),
         };
 
         (status, Json(BadRequestResponse { message })).into_response()
