@@ -4,8 +4,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use axum::{
+    body::Body,
+    http::{HeaderValue, Request, StatusCode, header::AUTHORIZATION},
+    middleware::{Next, from_fn},
+    response::Response,
+};
 use miden_testnet_bridge::{
-    arc_store,
+    RedactAuthorizationLayer, arc_store,
     chains::{
         evm::{EvmClient, EvmConfig},
         miden::MidenClient,
@@ -16,6 +22,7 @@ use miden_testnet_bridge::{
         pricer::MockPricer,
         state::{PostgresStateStore, StateStore},
     },
+    redact_authorization_value,
     types::{
         DepositMode, DepositType, Quote, QuoteRequest, QuoteResponse, RecipientType, RefundType,
         SwapType,
@@ -27,6 +34,7 @@ use sqlx_postgres::PgPool;
 use tempfile::tempdir;
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres::Postgres;
+use tower::ServiceExt;
 use tracing::subscriber::set_default;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -101,6 +109,20 @@ impl Write for SharedBufferGuard {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+async fn log_authorization(request: Request<Body>, next: Next) -> Response {
+    let authorization = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    tracing::info!(authorization, "captured request");
+    next.run(request).await
+}
+
+fn captured_logs(buffer: &SharedBuffer) -> String {
+    String::from_utf8(buffer.0.lock().expect("log buffer").clone()).expect("utf8 log output")
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -228,6 +250,68 @@ async fn stuck_processing_tick_logs_warn_and_leaves_state_unchanged() {
     );
     assert_eq!(value["fields"]["status"], "PROCESSING");
     assert!(value["fields"]["last_event_at"].is_string());
+}
+
+#[tokio::test]
+async fn bearer_authorization_is_redacted_before_logging() {
+    let buffer = SharedBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(EnvFilter::new("info"))
+        .with_writer(buffer.clone())
+        .finish();
+    let expected = redact_authorization_value(&HeaderValue::from_static("Bearer secret"))
+        .to_str()
+        .expect("header value")
+        .to_owned();
+    let guard = set_default(subscriber);
+
+    let app = axum::Router::new()
+        .route("/ping", axum::routing::get(|| async { StatusCode::OK }))
+        .layer(from_fn(log_authorization))
+        .layer(RedactAuthorizationLayer);
+
+    let response = app
+        .oneshot(
+            Request::get("/ping")
+                .header(AUTHORIZATION, "Bearer secret")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    drop(guard);
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let logs = captured_logs(&buffer);
+    assert!(logs.contains(&expected));
+    assert!(!logs.contains("secret"));
+}
+
+#[test]
+fn json_logs_are_parseable() {
+    let buffer = SharedBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(EnvFilter::new("info"))
+        .with_writer(buffer.clone())
+        .finish();
+    let guard = set_default(subscriber);
+    tracing::info!(component = "test", "json log");
+    drop(guard);
+
+    let logs = captured_logs(&buffer);
+    let line = logs
+        .lines()
+        .find(|line| !line.is_empty())
+        .expect("json line");
+    let value: Value = serde_json::from_str(line).expect("valid json log line");
+    assert_eq!(value["level"], "INFO");
+    assert!(value["target"].as_str().is_some());
+    assert_eq!(value["fields"]["message"], "json log");
+    assert_eq!(value["fields"]["component"], "test");
+    assert!(value.get("timestamp").is_some());
 }
 
 async fn build_lifecycle(

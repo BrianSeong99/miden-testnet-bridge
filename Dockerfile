@@ -19,7 +19,7 @@ COPY migrations ./migrations
 
 ENV BRIDGE_HTTP_PORT=8080 \
     LOG_FORMAT=json \
-    RUST_LOG=info
+    RUST_LOG=info,sqlx=warn,hyper=warn,tower_http=warn
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
