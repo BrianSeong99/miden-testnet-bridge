@@ -9,11 +9,14 @@ services:
         condition: service_healthy
       anvil-init:
         condition: service_completed_successfully
+      miden-node:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/miden_bridge}
-      MIDEN_RPC_URL: ${MIDEN_RPC_URL:-http://host.docker.internal:57291}
+      MIDEN_RPC_URL: ${MIDEN_RPC_URL:-http://miden-node:57291}
+      MIDEN_STORE_DIR: ${MIDEN_STORE_DIR:-/var/lib/bridge/miden-store}
       EVM_RPC_URL: ${EVM_RPC_URL:-http://anvil:8545}
       MASTER_MNEMONIC: ${MASTER_MNEMONIC:-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about}
       SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382dbb7d2745078b2336b91c60d50d6b6d7}
@@ -26,12 +29,47 @@ services:
       - "${BRIDGE_HTTP_PORT:-8080}:8080"
     volumes:
       - anvil-state:/state:ro
+      - bridge-miden-store:/var/lib/bridge/miden-store
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  miden-node:
+    build:
+      context: .
+      dockerfile: Dockerfile.miden-node
+      args:
+        MIDEN_NODE_REF: v0.14.10
+    image: miden-node-local:v0.14.10
+    command: ["/bin/bash", "/scripts/miden_node_start.sh"]
+    volumes:
+      - miden-node-data:/var/lib/miden/data
+      - miden-node-accounts:/var/lib/miden/accounts
+      - ./scripts/miden_node_start.sh:/scripts/miden_node_start.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 57291"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  miden-node-genesis:
+    profiles: ["genesis"]
+    build:
+      context: .
+      dockerfile: Dockerfile.miden-node
+      args:
+        MIDEN_NODE_REF: v0.14.10
+    image: miden-node-local:v0.14.10
+    command: ["/bin/bash", "/scripts/miden_node_genesis.sh"]
+    restart: "no"
+    volumes:
+      - miden-node-data:/var/lib/miden/data
+      - miden-node-accounts:/var/lib/miden/accounts
+      - ./scripts/miden_node_genesis.sh:/scripts/miden_node_genesis.sh:ro
 
   anvil:
     image: ghcr.io/foundry-rs/foundry:latest
@@ -97,4 +135,7 @@ services:
 
 volumes:
   anvil-state:
+  bridge-miden-store:
+  miden-node-accounts:
+  miden-node-data:
   postgres-data:
