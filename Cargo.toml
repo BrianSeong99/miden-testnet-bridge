@@ -14,6 +14,7 @@ miden-protocol = "=0.14.5"
 miden-standards = "=0.14.5"
 rand = "0.9"
 reqwest = { version = "0.13", features = ["json"] }
+rust_decimal = "1.39"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -33,3 +34,4 @@ uuid = { version = "1.23", features = ["v4", "serde"] }
 tempfile = "3.23"
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres"] }
+wiremock = "0.6"

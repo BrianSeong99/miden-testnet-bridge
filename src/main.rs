@@ -14,7 +14,10 @@ use miden_testnet_bridge::{
         miden_bootstrap::bootstrap_miden,
         miden_outbound::poll_outbound_deposits,
     },
-    core::state::{PostgresStateStore, connect_pool},
+    core::{
+        pricer::CoinGeckoPricer,
+        state::{PostgresStateStore, connect_pool},
+    },
     init_tracing,
 };
 use sqlx::migrate::Migrator;
@@ -163,7 +166,8 @@ async fn main() -> Result<()> {
             .expect("outbound poller");
     });
 
-    let state = AppState::with_clients(store, evm, miden, miden_master_seed);
+    let pricer = Arc::new(CoinGeckoPricer::new());
+    let state = AppState::with_clients(store, pricer, evm, miden, miden_master_seed);
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await
