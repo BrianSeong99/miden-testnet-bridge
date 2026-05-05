@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Miden Testnet Bridge Service - E2E Evidence Report</title>
+  <style type="text/css">
+    :root {
+      color-scheme: light;
+      --bg: #f4f1ea;
+      --paper: #fbfaf6;
+      --ink: #181714;
+      --muted: #6f6a5f;
+      --line: #d8d0c1;
+      --line-strong: #a79a86;
+      --accent: #1d5f58;
+      --accent-ink: #0d3733;
+      --good: #176b43;
+      --warn: #8a5a00;
+      --code: #ede8dc;
+      --shadow: 0 18px 50px rgba(24, 23, 20, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--accent-ink);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(29, 95, 88, 0.35);
+    }
+
+    a:hover {
+      border-bottom-color: var(--accent-ink);
+    }
+
+    code,
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 64px;
+    }
+
+    .mast {
+      border-top: 2px solid var(--ink);
+      border-bottom: 1px solid var(--line-strong);
+      padding: 18px 0 22px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .kicker {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .mast h1 {
+      margin: 0;
+      max-width: 880px;
+      font-size: clamp(40px, 7vw, 86px);
+      line-height: 0.94;
+      letter-spacing: 0;
+      font-weight: 760;
+    }
+
+    .mast-aside {
+      min-width: 210px;
+      border-left: 1px solid var(--line);
+      padding-left: 22px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .mast-aside strong {
+      display: block;
+      color: var(--ink);
+      font-size: 15px;
+      margin-bottom: 2px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 26px;
+      margin: 34px 0;
+      align-items: stretch;
+    }
+
+    .statement {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      padding: 28px;
+      box-shadow: var(--shadow);
+    }
+
+    .statement p {
+      margin: 0;
+      font-size: clamp(20px, 2.4vw, 31px);
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    .facts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    .fact {
+      padding: 18px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      min-height: 92px;
+    }
+
+    .fact:nth-child(2n) {
+      border-right: 0;
+    }
+
+    .fact:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
+
+    .fact-label {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .fact-value {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 680;
+      overflow-wrap: anywhere;
+    }
+
+    .nav {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin: 22px 0 46px;
+    }
+
+    .nav a {
+      border: 1px solid var(--line);
+      background: rgba(251, 250, 246, 0.7);
+      color: var(--ink);
+      padding: 13px 14px;
+      font-size: 13px;
+      min-height: 68px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .nav span {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+    }
+
+    .report-section {
+      margin: 0 0 48px;
+      border-top: 2px solid var(--ink);
+      padding-top: 22px;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: start;
+      margin-bottom: 18px;
+    }
+
+    .section-num {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 54px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid rgba(23, 107, 67, 0.35);
+      background: rgba(23, 107, 67, 0.08);
+      color: var(--good);
+      font-weight: 760;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .badge.warn {
+      border-color: rgba(138, 90, 0, 0.35);
+      background: rgba(138, 90, 0, 0.08);
+      color: var(--warn);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .pipeline,
+    .evidence,
+    .note {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      padding: 20px;
+    }
+
+    .pipeline ol {
+      list-style: none;
+      counter-reset: step;
+      padding: 0;
+      margin: 0;
+    }
+
+    .pipeline li {
+      counter-increment: step;
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .pipeline li:last-child {
+      border-bottom: 0;
+    }
+
+    .pipeline li::before {
+      content: counter(step, decimal-leading-zero);
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      padding-top: 2px;
+    }
+
+    .pipeline strong {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 3px;
+    }
+
+    .pipeline span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .evidence h3,
+    .note h3 {
+      margin: 0 0 14px;
+      font-size: 16px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: minmax(130px, 0.38fr) minmax(0, 1fr);
+      gap: 0;
+      margin: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .kv dt,
+    .kv dd {
+      margin: 0;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .kv dt {
+      color: var(--muted);
+      font-size: 13px;
+      padding-right: 16px;
+    }
+
+    .kv dd {
+      overflow-wrap: anywhere;
+      font-size: 14px;
+    }
+
+    .raw {
+      margin-top: 16px;
+      background: var(--code);
+      border: 1px solid var(--line);
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre;
+    }
+
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    .matrix th,
+    .matrix td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .matrix th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: rgba(237, 232, 220, 0.6);
+    }
+
+    .matrix tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .foot {
+      margin-top: 56px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line-strong);
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      .page {
+        width: min(100% - 24px, 760px);
+        padding-top: 20px;
+      }
+
+      .mast,
+      .summary,
+      .section-head,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .mast-aside {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding: 16px 0 0;
+      }
+
+      .nav {
+        grid-template-columns: 1fr;
+      }
+
+      .facts {
+        grid-template-columns: 1fr;
+      }
+
+      .fact,
+      .fact:nth-child(2n),
+      .fact:nth-last-child(-n + 2) {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .fact:last-child {
+        border-bottom: 0;
+      }
+
+      .kv {
+        grid-template-columns: 1fr;
+      }
+
+      .kv dt {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+
+      .foot {
+        flex-direction: column;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .page {
+        width: 100%;
+      }
+
+      .statement,
+      .pipeline,
+      .evidence,
+      .note,
+      .facts,
+      .nav a {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="mast">
+      <div>
+        <p class="kicker">Miden Testnet Bridge Service &middot; Evidence Report &middot; No. 001</p>
+        <h1>Miden testnet bridge, end-to-end verified.</h1>
+      </div>
+      <div class="mast-aside">
+        <strong>Generated</strong>
+        2026-05-05
+        <br><br>
+        <strong>Branch</strong>
+        <code>chore/13-testnet-pivot</code>
+        <br><br>
+        <strong>Snapshot</strong>
+        <code>aea3a4c</code> + local working tree
+        <br><br>
+        <strong>Hosted URL</strong>
+        <a href="https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html">GitHub Pages</a>
+      </div>
+    </div>
+
+    <div class="summary">
+      <div class="statement">
+        <p>
+          The public-note bridge design passed all five E2E paths using public
+          Miden testnet and local Anvil. The run proves quote creation,
+          public note payout/discovery, public bridge-note consumption,
+          EVM release/refund, and restart recovery with durable transaction evidence.
+        </p>
+      </div>
+
+      <div class="facts">
+        <div class="fact">
+          <p class="fact-label">Miden network</p>
+          <p class="fact-value">Public testnet</p>
+        </div>
+        <div class="fact">
+          <p class="fact-label">EVM network</p>
+          <p class="fact-value">Local Anvil</p>
+        </div>
+        <div class="fact">
+          <p class="fact-label">Suite result</p>
+          <p class="fact-value">5 passed / 0 failed</p>
+        </div>
+        <div class="fact">
+          <p class="fact-label">Duration</p>
+          <p class="fact-value">822.50s</p>
+        </div>
+        <div class="fact">
+          <p class="fact-label">Miden RPC</p>
+          <p class="fact-value"><code>https://rpc.testnet.miden.io</code></p>
+        </div>
+        <div class="fact">
+          <p class="fact-label">Acceptance note</p>
+          <p class="fact-value">Sepolia is next, not claimed here</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav">
+      <a href="#inbound"><span>01</span>Inbound - EVM to Miden</a>
+      <a href="#incomplete"><span>02</span>Incomplete deposit</a>
+      <a href="#outbound"><span>03</span>Outbound - Miden to EVM</a>
+      <a href="#refund"><span>04</span>Refund on slippage</a>
+      <a href="#restart"><span>05</span>Restart / resume</a>
+    </div>
+
+    <div class="report-section" id="inbound">
+      <div class="section-head">
+        <div>
+          <p class="section-num">01 - Inbound</p>
+          <h2>Anvil deposit to Miden public P2ID note</h2>
+        </div>
+        <span class="badge">PASS - Full success</span>
+      </div>
+
+      <div class="flow">
+        <div class="pipeline">
+          <ol>
+            <li><div><strong>Quote</strong><span>User requests <code>eth-anvil:eth</code> to <code>miden-local:eth</code>.</span></div></li>
+            <li><div><strong>EVM deposit</strong><span>Bridge detects and confirms the local Anvil deposit tx.</span></div></li>
+            <li><div><strong>Settlement</strong><span>Lifecycle advances through <code>PROCESSING</code>.</span></div></li>
+            <li><div><strong>Miden mint</strong><span>Bridge submits a public P2ID payout note on Miden testnet.</span></div></li>
+            <li><div><strong>Recipient discovery</strong><span>A separate Miden client syncs and finds one consumable note.</span></div></li>
+          </ol>
+        </div>
+
+        <div class="evidence">
+          <h3>Evidence</h3>
+          <dl class="kv">
+            <dt>Correlation</dt>
+            <dd><code>862a5ab0-9634-4e8a-85f6-8c336983d55f</code></dd>
+            <dt>Anvil deposit tx</dt>
+            <dd><code>0xe95cb1ab8a3e329f37283de16fd6425a98a1a9ff38e7af1dab176678ad197aeb</code></dd>
+            <dt>Miden mint tx</dt>
+            <dd><a href="https://testnet.midenscan.com/tx/0x73aa5dce46f60e4b267c69361eb459d64b93297110e7d73186c14a1dafa99ac2" target="_blank" rel="noreferrer"><code>0x73aa5dce...afa99ac2</code></a></dd>
+            <dt>Consumable notes</dt>
+            <dd><code>1</code></dd>
+          </dl>
+          <pre class="raw">E2E_EVIDENCE inbound correlation_id=862a5ab0-9634-4e8a-85f6-8c336983d55f evm_deposit_tx_hashes=["0xe95cb1ab8a3e329f37283de16fd6425a98a1a9ff38e7af1dab176678ad197aeb"] miden_mint_tx_ids=["0x73aa5dce46f60e4b267c69361eb459d64b93297110e7d73186c14a1dafa99ac2"] consumable_note_count=1</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" id="incomplete">
+      <div class="section-head">
+        <div>
+          <p class="section-num">02 - Incomplete</p>
+          <h2>Below-minimum deposit remains incomplete</h2>
+        </div>
+        <span class="badge">PASS - Terminal incomplete</span>
+      </div>
+
+      <div class="flow">
+        <div class="pipeline">
+          <ol>
+            <li><div><strong>Quote</strong><span>Bridge returns a minimum expected amount.</span></div></li>
+            <li><div><strong>Short deposit</strong><span>Test sends less than the required amount to Anvil.</span></div></li>
+            <li><div><strong>Detection</strong><span>Bridge records the deposit tx.</span></div></li>
+            <li><div><strong>Status</strong><span>Lifecycle settles on <code>INCOMPLETE_DEPOSIT</code>.</span></div></li>
+          </ol>
+        </div>
+
+        <div class="evidence">
+          <h3>Evidence</h3>
+          <dl class="kv">
+            <dt>Correlation</dt>
+            <dd><code>c26ca708-2348-49e8-b3bd-ae36fc9838eb</code></dd>
+            <dt>Anvil deposit tx</dt>
+            <dd><code>0x63041961b5f9c066c2729db2556551cadb3f77491b8d4e3e54ce50434eb97daa</code></dd>
+            <dt>Final status</dt>
+            <dd><code>INCOMPLETE_DEPOSIT</code></dd>
+          </dl>
+          <pre class="raw">E2E_EVIDENCE incomplete correlation_id=c26ca708-2348-49e8-b3bd-ae36fc9838eb evm_deposit_tx_hashes=["0x63041961b5f9c066c2729db2556551cadb3f77491b8d4e3e54ce50434eb97daa"]</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" id="outbound">
+      <div class="section-head">
+        <div>
+          <p class="section-num">03 - Outbound</p>
+          <h2>Miden public BridgeOutV1 note to Anvil release</h2>
+        </div>
+        <span class="badge">PASS - Public note consumed</span>
+      </div>
+
+      <div class="flow">
+        <div class="pipeline">
+          <ol>
+            <li><div><strong>Funding</strong><span>Inbound funding gives the sender Miden-side ETH.</span></div></li>
+            <li><div><strong>Quote</strong><span>Bridge returns stable account plus <code>BridgeOutV1</code> deposit memo.</span></div></li>
+            <li><div><strong>Public note</strong><span>Sender creates a public programmable note with assets attached.</span></div></li>
+            <li><div><strong>Validation</strong><span>Bridge matches bridge target, quote hash, faucet, and amount.</span></div></li>
+            <li><div><strong>Consume and release</strong><span>Miden consume tx commits before the EVM release tx is recorded.</span></div></li>
+          </ol>
+        </div>
+
+        <div class="evidence">
+          <h3>Evidence</h3>
+          <dl class="kv">
+            <dt>Funding quote</dt>
+            <dd><code>787bb932-965a-4f07-bca0-40474caabf6a</code></dd>
+            <dt>Outbound quote</dt>
+            <dd><code>3f5141a5-79b1-47fb-9225-c12bddc68b2b</code></dd>
+            <dt>Quote hash</dt>
+            <dd><code>0xad4a14889b226f7de0cabff6371d7058606e03ca165b325cf9b5400c23741259</code></dd>
+            <dt>Miden consume tx</dt>
+            <dd><a href="https://testnet.midenscan.com/tx/0x65af9db10ea57f4c7934d024b6e5b8ccfc7881189a2f650b53eaff726360ea62" target="_blank" rel="noreferrer"><code>0x65af9db1...6360ea62</code></a></dd>
+            <dt>Anvil release tx</dt>
+            <dd><code>0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b</code></dd>
+            <dt>Balance delta</dt>
+            <dd><code>1000000000000</code></dd>
+          </dl>
+          <pre class="raw">E2E_EVIDENCE outbound funding_correlation_id=787bb932-965a-4f07-bca0-40474caabf6a outbound_correlation_id=3f5141a5-79b1-47fb-9225-c12bddc68b2b quote_hash=0xad4a14889b226f7de0cabff6371d7058606e03ca165b325cf9b5400c23741259 miden_consume_tx_ids=["0x65af9db10ea57f4c7934d024b6e5b8ccfc7881189a2f650b53eaff726360ea62"] evm_release_tx_hashes=["0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b"] balance_delta=1000000000000</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" id="refund">
+      <div class="section-head">
+        <div>
+          <p class="section-num">04 - Refund</p>
+          <h2>Forced slippage refunds origin chain</h2>
+        </div>
+        <span class="badge">PASS - Refund recorded</span>
+      </div>
+
+      <div class="flow">
+        <div class="pipeline">
+          <ol>
+            <li><div><strong>Quote</strong><span>User quotes inbound Anvil ETH to Miden ETH.</span></div></li>
+            <li><div><strong>Deposit</strong><span>Anvil deposit is detected and confirmed.</span></div></li>
+            <li><div><strong>Slippage trigger</strong><span>Test raises <code>minAmountOut</code> above the settlement requote.</span></div></li>
+            <li><div><strong>Refund</strong><span>Bridge submits and persists an EVM refund tx hash.</span></div></li>
+          </ol>
+        </div>
+
+        <div class="evidence">
+          <h3>Evidence</h3>
+          <dl class="kv">
+            <dt>Correlation</dt>
+            <dd><code>dd094af4-73f6-40c0-bb86-2eea34cc7d06</code></dd>
+            <dt>Anvil deposit tx</dt>
+            <dd><code>0xb4beae8830c684109e22a9fc37d30ff2acad26806d412ec8275abaf2a81abdaf</code></dd>
+            <dt>Anvil refund tx</dt>
+            <dd><code>0xa435edec34875647ccecef0358a8a437a47173152fafcb9e07d3dd97cde802f4</code></dd>
+            <dt>Final status</dt>
+            <dd><code>REFUNDED</code></dd>
+          </dl>
+          <pre class="raw">E2E_EVIDENCE refund correlation_id=dd094af4-73f6-40c0-bb86-2eea34cc7d06 evm_deposit_tx_hashes=["0xb4beae8830c684109e22a9fc37d30ff2acad26806d412ec8275abaf2a81abdaf"] evm_refund_tx_hashes=["0xa435edec34875647ccecef0358a8a437a47173152fafcb9e07d3dd97cde802f4"]</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" id="restart">
+      <div class="section-head">
+        <div>
+          <p class="section-num">05 - Restart</p>
+          <h2>Processing quote resumes after bridge restart</h2>
+        </div>
+        <span class="badge">PASS - Durable recovery</span>
+      </div>
+
+      <div class="flow">
+        <div class="pipeline">
+          <ol>
+            <li><div><strong>Processing state</strong><span>Deposit reaches <code>PROCESSING</code>.</span></div></li>
+            <li><div><strong>Restart</strong><span>Test restarts the bridge container during processing.</span></div></li>
+            <li><div><strong>Reload</strong><span>Bridge reloads non-terminal quote state from Postgres.</span></div></li>
+            <li><div><strong>Durable tx handling</strong><span>Stale Miden idempotency without tx id is treated as interrupted pre-durable work.</span></div></li>
+            <li><div><strong>Success</strong><span>Bridge submits/records the Miden mint tx and reaches <code>SUCCESS</code>.</span></div></li>
+          </ol>
+        </div>
+
+        <div class="evidence">
+          <h3>Evidence</h3>
+          <dl class="kv">
+            <dt>Correlation</dt>
+            <dd><code>482ee24d-9c04-4a0a-8cf0-11fa270aaeec</code></dd>
+            <dt>Anvil deposit tx</dt>
+            <dd><code>0x5c831f42cf38944fef3c5ca0b926218d1277257af4db8bf72a7dd5ce10f6e656</code></dd>
+            <dt>Miden mint tx</dt>
+            <dd><a href="https://testnet.midenscan.com/tx/0x276c72b9ff2919a4e8072fe08828cd28e96aa2b1e64ffcda5a6ba551a5e92898" target="_blank" rel="noreferrer"><code>0x276c72b9...a5e92898</code></a></dd>
+            <dt>Final status</dt>
+            <dd><code>SUCCESS</code></dd>
+          </dl>
+          <pre class="raw">E2E_EVIDENCE restart_resume correlation_id=482ee24d-9c04-4a0a-8cf0-11fa270aaeec evm_deposit_tx_hashes=["0x5c831f42cf38944fef3c5ca0b926218d1277257af4db8bf72a7dd5ce10f6e656"] miden_mint_tx_ids=["0x276c72b9ff2919a4e8072fe08828cd28e96aa2b1e64ffcda5a6ba551a5e92898"]</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" id="verification">
+      <div class="section-head">
+        <div>
+          <p class="section-num">Verification</p>
+          <h2>Commands and scope</h2>
+        </div>
+        <span class="badge warn">Sepolia pending</span>
+      </div>
+
+      <div class="flow">
+        <div class="note">
+          <h3>Run command</h3>
+          <pre class="raw">RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocapture --test-threads=1
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 822.50s</pre>
+          <p>
+            Non-E2E regression also passed:
+            <code>cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state</code>.
+          </p>
+        </div>
+
+        <div class="note">
+          <h3>Auditability</h3>
+          <table class="matrix" summary="Evidence artifact visibility and use">
+            <thead>
+              <tr>
+                <th>Artifact</th>
+                <th>Visibility</th>
+                <th>Use</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Miden tx ids</td>
+                <td>Public Midenscan links</td>
+                <td>Prove Miden mint/consume transactions committed on testnet.</td>
+              </tr>
+              <tr>
+                <td>Anvil tx hashes</td>
+                <td>Local run only</td>
+                <td>Correlate EVM deposit, release, and refund inside the E2E harness.</td>
+              </tr>
+              <tr>
+                <td>Quote hashes</td>
+                <td>Report/log evidence</td>
+                <td>Bind public <code>BridgeOutV1</code> note storage to a quote.</td>
+              </tr>
+              <tr>
+                <td>GitHub issues</td>
+                <td>Repository evidence trail</td>
+                <td><a href="https://github.com/BrianSeong99/miden-testnet-bridge/issues/29#issuecomment-4379012229" target="_blank" rel="noreferrer">E2E evidence</a> and <a href="https://github.com/BrianSeong99/miden-testnet-bridge/issues/35#issuecomment-4379012513" target="_blank" rel="noreferrer">trace evidence</a>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>Miden Testnet Bridge Service &middot; public-note E2E evidence &middot; 2026-05-05</span>
+      <span>Public links resolve to <strong>testnet.midenscan.com</strong>; Anvil hashes are local-run artifacts.</span>
+    </div>
+  </div>
+</body>
+</html>
