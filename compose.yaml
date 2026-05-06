@@ -9,14 +9,18 @@ services:
         condition: service_healthy
       anvil-init:
         condition: service_completed_successfully
-      miden-node:
-        condition: service_healthy
       postgres:
         condition: service_healthy
+      miden-node:
+        condition: service_healthy
+        required: false
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/miden_bridge}
-      MIDEN_RPC_URL: ${MIDEN_RPC_URL:-http://miden-node:57291}
+      MIDEN_RPC_URL: ${MIDEN_RPC_URL:-https://rpc.testnet.miden.io}
+      MIDEN_REMOTE_PROVER_URL: ${MIDEN_REMOTE_PROVER_URL:-}
+      MIDEN_REMOTE_PROVER_TIMEOUT_SECS: ${MIDEN_REMOTE_PROVER_TIMEOUT_SECS:-10}
       MIDEN_STORE_DIR: ${MIDEN_STORE_DIR:-/var/lib/bridge/miden-store}
+      MIDEN_MASTER_SEED_HEX: ${MIDEN_MASTER_SEED_HEX:-0101010101010101010101010101010101010101010101010101010101010101}
       EVM_RPC_URL: ${EVM_RPC_URL:-http://anvil:8545}
       MASTER_MNEMONIC: ${MASTER_MNEMONIC:-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about}
       SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382dbb7d2745078b2336b91c60d50d6b6d7}
@@ -25,6 +29,9 @@ services:
       BRIDGE_HTTP_PORT: ${BRIDGE_HTTP_PORT:-8080}
       RUST_LOG: ${RUST_LOG:-info,sqlx=warn,hyper=warn,tower_http=warn}
       LOG_FORMAT: ${LOG_FORMAT:-json}
+      # Forward BRIDGE_PRICER through from the caller (e2e harness sets =mock;
+      # production leaves it unset for the CoinGecko default).
+      BRIDGE_PRICER: ${BRIDGE_PRICER:-}
     ports:
       - "${BRIDGE_HTTP_PORT:-8080}:8080"
     volumes:
@@ -32,12 +39,17 @@ services:
       - bridge-miden-store:/var/lib/bridge/miden-store
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # Bridge bootstrap submits multiple Miden testnet transactions
+      # (solver deploy, faucet deploys, solver liquidity). Remote proving
+      # removes the local prover cost, but testnet confirmation still needs
+      # a longer startup window.
+      start_period: 300s
 
   miden-node:
+    profiles: ["local-node"]
     build:
       context: .
       dockerfile: Dockerfile.miden-node
@@ -45,6 +57,9 @@ services:
         MIDEN_NODE_REF: v0.14.10
     image: miden-node-local:v0.14.10
     command: ["/bin/bash", "/scripts/miden_node_start.sh"]
+    depends_on:
+      miden-node-genesis:
+        condition: service_completed_successfully
     ports:
       - "57291:57291"
     volumes:
@@ -59,7 +74,7 @@ services:
       start_period: 10s
 
   miden-node-genesis:
-    profiles: ["genesis"]
+    profiles: ["genesis", "local-node"]
     build:
       context: .
       dockerfile: Dockerfile.miden-node
@@ -91,6 +106,8 @@ services:
 
   anvil-init:
     image: ghcr.io/foundry-rs/foundry:latest
+    user: root
+    entrypoint: ["/bin/bash", "/bootstrap/anvil_bootstrap.sh"]
     depends_on:
       anvil:
         condition: service_healthy
@@ -104,7 +121,6 @@ services:
       - ./scripts/anvil_bootstrap.sh:/bootstrap/anvil_bootstrap.sh:ro
       - ./contracts:/workspace/contracts:ro
       - ./foundry.toml:/workspace/foundry.toml:ro
-    command: ["/bin/bash", "/bootstrap/anvil_bootstrap.sh"]
 
   postgres:
     image: postgres:17

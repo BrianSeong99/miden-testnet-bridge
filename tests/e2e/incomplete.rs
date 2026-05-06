@@ -5,16 +5,14 @@ use serial_test::serial;
 use uuid::Uuid;
 
 use crate::common::{
-    Direction, assert_status_subsequence, run_e2e_enabled, send_native_eth, start_test,
+    Direction, LOCAL_ETH_E2E_AMOUNT, LOCAL_ETH_E2E_AMOUNT_STR, assert_status_subsequence,
+    require_e2e, send_native_eth, start_test,
 };
 
 #[tokio::test]
 #[serial]
 async fn deposit_below_min_amount_becomes_incomplete() -> Result<()> {
-    if !run_e2e_enabled() {
-        eprintln!("skipping incomplete e2e; set RUN_E2E=1");
-        return Ok(());
-    }
+    require_e2e("incomplete e2e");
 
     let ctx = start_test("incomplete").await?;
     let user_wallet = ctx.create_wallet("incomplete-user").await?;
@@ -23,7 +21,7 @@ async fn deposit_below_min_amount_becomes_incomplete() -> Result<()> {
         .make_quote_with_parties(
             Direction::Inbound,
             "eth",
-            "1000000000000000000",
+            LOCAL_ETH_E2E_AMOUNT_STR,
             &recipient,
             "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
         )
@@ -35,11 +33,12 @@ async fn deposit_below_min_amount_becomes_incomplete() -> Result<()> {
         .expect("deposit address");
     let correlation_id = Uuid::parse_str(&quote.correlation_id)?;
 
-    send_native_eth(&deposit_address, 500_000_000_000_000_000).await?;
+    send_native_eth(&deposit_address, LOCAL_ETH_E2E_AMOUNT / 2).await?;
 
     let status = ctx
         .poll_status_until(
             &deposit_address,
+            None,
             miden_testnet_bridge::types::SwapStatus::IncompleteDeposit,
             Duration::from_secs(120),
         )
@@ -48,6 +47,11 @@ async fn deposit_below_min_amount_becomes_incomplete() -> Result<()> {
 
     let lifecycle = ctx.lifecycle_statuses(correlation_id).await?;
     assert_status_subsequence(&lifecycle, &["KNOWN_DEPOSIT_TX", "INCOMPLETE_DEPOSIT"]);
+    let artifacts = ctx.chain_artifacts(correlation_id).await?;
+    println!(
+        "E2E_EVIDENCE incomplete correlation_id={} evm_deposit_tx_hashes={:?}",
+        quote.correlation_id, artifacts.evm_deposit_tx_hashes
+    );
 
     Ok(())
 }

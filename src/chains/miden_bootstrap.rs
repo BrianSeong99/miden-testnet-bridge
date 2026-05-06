@@ -6,7 +6,7 @@ use miden_client::{
     asset::{FungibleAsset, TokenSymbol},
     auth::{AuthSchemeId, AuthSecretKey, AuthSingleSig},
     note::NoteType,
-    store::TransactionFilter,
+    store::{AccountStatus, TransactionFilter},
     transaction::{TransactionRequestBuilder, TransactionStatus},
 };
 use miden_protocol::Felt;
@@ -106,8 +106,37 @@ pub async fn create_solver_wallet(client: &MidenClient, master_seed: &[u8; 32]) 
             .await
             .context("failed to add solver account to client store")?;
     }
+    ensure_account_deployed(&mut inner, &account).await?;
 
     Ok(account)
+}
+
+async fn ensure_account_deployed(
+    inner: &mut miden_client::Client<miden_client::keystore::FilesystemKeyStore>,
+    account: &Account,
+) -> Result<()> {
+    // Sync chain tip before any submission. Without this the local store
+    // thinks tip is 0 and the data-store rejects the tx with "block with
+    // number 0 not found".
+    sync_with_retry(inner).await?;
+
+    let status = inner
+        .account_reader(account.id())
+        .status()
+        .await
+        .context("failed to read solver account status")?;
+    if !matches!(status, AccountStatus::New { .. }) {
+        return Ok(());
+    }
+
+    let tx_request = TransactionRequestBuilder::new()
+        .build()
+        .context("failed to build solver deploy transaction")?;
+    let tx_id = inner
+        .submit_new_transaction(account.id(), tx_request)
+        .await
+        .context("failed to submit solver deploy transaction")?;
+    wait_for_tx(inner, tx_id).await
 }
 
 pub async fn bootstrap_miden(
@@ -115,18 +144,34 @@ pub async fn bootstrap_miden(
     state_store: DynStateStore,
     master_seed: &[u8; 32],
 ) -> Result<BootstrapState> {
+    let solver = create_solver_wallet(client, master_seed).await?;
+
     if let Some(existing) = state_store.get_miden_bootstrap().await? {
         let state = bootstrap_state_from_record(&existing)?;
+        if state.solver_account_id != solver.id() {
+            return Err(anyhow!(
+                "persisted solver account {} does not match deterministic solver account {}",
+                state.solver_account_id,
+                solver.id()
+            ));
+        }
         ensure_solver_liquidity(client, &state).await?;
         return Ok(state);
     }
 
-    let solver = create_solver_wallet(client, master_seed).await?;
     let mut faucet_ids = Vec::new();
     for (asset_id, symbol) in SUPPORTED_ASSETS {
-        let faucet = deploy_faucet(client, symbol, asset_decimals(asset_id)?, u64::MAX)
-            .await
-            .with_context(|| format!("failed to deploy {symbol} faucet"))?;
+        // Miden Felt's prime is ~1.844e19 (2^64 - 2^32 + 1). u64::MAX overflows it
+        // and trips a kernel assertion at mint time. 10^16 is plenty of headroom for
+        // a testnet mock — three orders of magnitude above any solver liquidity value.
+        let faucet = deploy_faucet(
+            client,
+            symbol,
+            asset_decimals(asset_id)?,
+            10_000_000_000_000_000,
+        )
+        .await
+        .with_context(|| format!("failed to deploy {symbol} faucet"))?;
         faucet_ids.push(faucet.id());
     }
 
@@ -206,6 +251,16 @@ async fn consume_all_notes(
     if notes.is_empty() {
         return Ok(());
     }
+
+    // Re-import the account before consuming so the local store picks up the
+    // commitment the chain advanced after the mint txns landed. Without this,
+    // submit_new_transaction trips "initial account commitment 0x0...0 does not
+    // match the current commitment" — gateway-fm hit the same idiom in their
+    // bridge_out_tool. Idempotent / no-op if already tracked.
+    if let Err(e) = inner.import_account_by_id(account_id).await {
+        tracing::debug!(error = %e, "re-import before consume (may be no-op)");
+    }
+    sync_with_retry(inner).await?;
 
     let tx_request = TransactionRequestBuilder::new().build_consume_notes(notes)?;
     let tx_id = inner

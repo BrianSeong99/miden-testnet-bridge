@@ -5,16 +5,14 @@ use serial_test::serial;
 use uuid::Uuid;
 
 use crate::common::{
-    Direction, assert_status_subsequence, run_e2e_enabled, send_native_eth, start_test,
+    Direction, LOCAL_ETH_E2E_AMOUNT, LOCAL_ETH_E2E_AMOUNT_STR, assert_status_subsequence,
+    require_e2e, send_native_eth, start_test,
 };
 
 #[tokio::test]
 #[serial]
 async fn inbound_deposit_mints_note_on_miden() -> Result<()> {
-    if !run_e2e_enabled() {
-        eprintln!("skipping inbound e2e; set RUN_E2E=1");
-        return Ok(());
-    }
+    require_e2e("inbound e2e");
 
     let ctx = start_test("inbound").await?;
     let bootstrap = ctx.bootstrap_state().await?;
@@ -24,7 +22,7 @@ async fn inbound_deposit_mints_note_on_miden() -> Result<()> {
         .make_quote_with_parties(
             Direction::Inbound,
             "eth",
-            "1000000000000000000",
+            LOCAL_ETH_E2E_AMOUNT_STR,
             &recipient,
             "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
         )
@@ -36,11 +34,12 @@ async fn inbound_deposit_mints_note_on_miden() -> Result<()> {
         .expect("deposit address");
     let correlation_id = Uuid::parse_str(&quote.correlation_id)?;
 
-    send_native_eth(&deposit_address, 1_000_000_000_000_000_000).await?;
+    send_native_eth(&deposit_address, LOCAL_ETH_E2E_AMOUNT).await?;
 
     let status = ctx
         .poll_status_until(
             &deposit_address,
+            None,
             miden_testnet_bridge::types::SwapStatus::Success,
             Duration::from_secs(120),
         )
@@ -66,6 +65,13 @@ async fn inbound_deposit_mints_note_on_miden() -> Result<()> {
         .wait_for_consumable_notes(&user_wallet, Duration::from_secs(60))
         .await?;
     assert!(note_count > 0);
+    println!(
+        "E2E_EVIDENCE inbound correlation_id={} evm_deposit_tx_hashes={:?} miden_mint_tx_ids={:?} consumable_note_count={}",
+        quote.correlation_id,
+        artifacts.evm_deposit_tx_hashes,
+        artifacts.miden_mint_tx_ids,
+        note_count
+    );
 
     let _ = bootstrap;
     Ok(())

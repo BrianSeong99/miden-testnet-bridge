@@ -1,7 +1,10 @@
-use std::path::Path;
+use std::{path::Path, process::Command, sync::OnceLock};
 
+use miden_client::account::{AccountStorageMode, AccountType};
 use miden_testnet_bridge::{
+    chains::miden_bridge_note::BridgeOutDepositMemo,
     core::state::{PostgresStateStore, StateStore, TxHashColumn},
+    test_support::test_miden_account_id,
     types::{
         DepositMode, DepositType, Quote, QuoteRequest, QuoteResponse, RecipientType, RefundType,
         SwapType,
@@ -54,6 +57,36 @@ impl TestDatabase {
             .expect("migrator");
         migrator.run(&pool).await.expect("run migrations");
         pool
+    }
+}
+
+fn skip_docker_tests_reason() -> Option<String> {
+    static DOCKER_CHECK: OnceLock<Option<String>> = OnceLock::new();
+    DOCKER_CHECK
+        .get_or_init(|| match Command::new("docker").args(["info"]).output() {
+            Ok(output) if output.status.success() => None,
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let detail = stderr
+                    .lines()
+                    .chain(stdout.lines())
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("docker daemon unavailable");
+                Some(format!(
+                    "Docker-backed state tests require daemon access; {detail}"
+                ))
+            }
+            Err(error) => Some(format!(
+                "Docker-backed state tests require daemon access; failed to run docker info: {error}"
+            )),
+        })
+        .clone()
+}
+
+fn require_docker_tests(test_name: &str) {
+    if let Some(reason) = skip_docker_tests_reason() {
+        panic!("skip: {test_name}; {reason}");
     }
 }
 
@@ -114,6 +147,59 @@ fn sample_quote_response(correlation_id: Uuid) -> QuoteResponse {
     }
 }
 
+fn sample_miden_bridge_note_quote(correlation_id: Uuid) -> (QuoteRequest, QuoteResponse) {
+    let bridge_account_id = test_miden_account_id(
+        AccountType::RegularAccountUpdatableCode,
+        AccountStorageMode::Private,
+        0xccdd_eeff,
+    )
+    .to_hex();
+    let request = QuoteRequest {
+        origin_asset: "miden-local:eth".to_owned(),
+        destination_asset: "eth-anvil:eth".to_owned(),
+        refund_to: "0xrefund".to_owned(),
+        recipient: "0xrecipient".to_owned(),
+        ..sample_quote_request()
+    };
+    let deposit_memo = BridgeOutDepositMemo::from_quote(
+        &request,
+        correlation_id,
+        &request.amount,
+        &bridge_account_id,
+    )
+    .and_then(|memo| memo.to_deposit_memo())
+    .expect("bridge note memo");
+
+    let response = QuoteResponse {
+        correlation_id: correlation_id.to_string(),
+        timestamp: "2026-04-30T00:00:00Z".to_owned(),
+        signature: String::new(),
+        quote_request: request.clone(),
+        quote: Quote {
+            deposit_address: Some(bridge_account_id),
+            deposit_memo: Some(deposit_memo),
+            amount_in: request.amount.clone(),
+            amount_in_formatted: request.amount.clone(),
+            amount_in_usd: "1.0".to_owned(),
+            min_amount_in: request.amount.clone(),
+            max_amount_in: None,
+            amount_out: request.amount.clone(),
+            amount_out_formatted: request.amount.clone(),
+            amount_out_usd: "1.0".to_owned(),
+            min_amount_out: request.amount.clone(),
+            deadline: Some(request.deadline.clone()),
+            time_when_inactive: Some(request.deadline.clone()),
+            time_estimate: 120.0,
+            virtual_chain_recipient: None,
+            virtual_chain_refund_recipient: None,
+            custom_recipient_msg: None,
+            refund_fee: None,
+        },
+    };
+
+    (request, response)
+}
+
 async fn setup_store() -> (
     TestDatabase,
     PgPool,
@@ -131,6 +217,8 @@ async fn setup_store() -> (
 
 #[tokio::test(flavor = "current_thread")]
 async fn insert_quote_persists_quote_and_bootstrap_rows() {
+    require_docker_tests("insert_quote_persists_quote_and_bootstrap_rows");
+
     let (_db, pool, store, request, response) = setup_store().await;
 
     store
@@ -174,6 +262,8 @@ async fn insert_quote_persists_quote_and_bootstrap_rows() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn get_quote_by_deposit_returns_joined_record() {
+    require_docker_tests("get_quote_by_deposit_returns_joined_record");
+
     let (_db, _pool, store, request, response) = setup_store().await;
     let correlation_id = Uuid::parse_str(&response.correlation_id).expect("correlation id");
     store
@@ -206,6 +296,8 @@ async fn get_quote_by_deposit_returns_joined_record() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn record_event_updates_status_and_writes_lifecycle_event() {
+    require_docker_tests("record_event_updates_status_and_writes_lifecycle_event");
+
     let (_db, pool, store, request, response) = setup_store().await;
     let correlation_id = Uuid::parse_str(&response.correlation_id).expect("correlation id");
     store
@@ -277,6 +369,8 @@ async fn record_event_updates_status_and_writes_lifecycle_event() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn record_idempotency_key_is_a_no_op_on_replay() {
+    require_docker_tests("record_idempotency_key_is_a_no_op_on_replay");
+
     let (_db, _pool, store, request, response) = setup_store().await;
     let correlation_id = Uuid::parse_str(&response.correlation_id).expect("correlation id");
     store
@@ -308,6 +402,8 @@ async fn record_idempotency_key_is_a_no_op_on_replay() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn append_tx_hash_updates_target_jsonb_array() {
+    require_docker_tests("append_tx_hash_updates_target_jsonb_array");
+
     let (_db, _pool, store, request, response) = setup_store().await;
     let correlation_id = Uuid::parse_str(&response.correlation_id).expect("correlation id");
     store
@@ -335,7 +431,37 @@ async fn append_tx_hash_updates_target_jsonb_array() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn list_miden_tracked_quotes_includes_public_bridge_note_quotes() {
+    require_docker_tests("list_miden_tracked_quotes_includes_public_bridge_note_quotes");
+
+    let (_db, _pool, store, _, _) = setup_store().await;
+    let correlation_id = Uuid::new_v4();
+    let (request, response) = sample_miden_bridge_note_quote(correlation_id);
+    store
+        .insert_quote(&response, &request)
+        .await
+        .expect("insert bridge-note quote");
+
+    let tracked = store
+        .list_miden_tracked_quotes()
+        .await
+        .expect("tracked quotes");
+
+    assert_eq!(tracked.len(), 1);
+    assert_eq!(tracked[0].correlation_id, correlation_id);
+    assert_eq!(
+        tracked[0].deposit_address,
+        response.quote.deposit_address.expect("deposit address")
+    );
+    assert!(tracked[0].deposit_memo.is_some());
+    assert_eq!(tracked[0].miden_deposit_account_id, None);
+    assert_eq!(tracked[0].miden_deposit_seed_hex, None);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn quote_state_survives_store_restart() {
+    require_docker_tests("quote_state_survives_store_restart");
+
     let (db, pool, store, request, response) = setup_store().await;
     store
         .insert_quote(&response, &request)
@@ -360,6 +486,8 @@ async fn quote_state_survives_store_restart() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn migrations_run_up_and_down_successfully() {
+    require_docker_tests("migrations_run_up_and_down_successfully");
+
     let db = TestDatabase::start().await;
     let pool = sqlx_postgres::PgPoolOptions::new()
         .max_connections(5)

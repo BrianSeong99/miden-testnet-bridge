@@ -1,132 +1,308 @@
 # miden-testnet-bridge
 
-`miden-testnet-bridge` is a local 1Click-compatible bridge shim for wallet and consumer integration work: it exposes the same `/v0/*` surface the wallet team expects, watches deposits on local Anvil and a local Miden node, and settles or refunds quotes through the bridge lifecycle. It is temporary infrastructure with a planned 6-week service life, intended to unblock integration work until the real NEAR 1Click service cutover in W7, with a target date of 2026-06-12.
+Mock NEAR Intents 1Click bridge between an EVM chain and Miden testnet.
 
-## Quickstart
+The validated path in this repo is public Miden testnet plus local Anvil. Local
+Miden node mode still exists as a manual fallback, but it is not the acceptance
+path for this bridge pivot.
 
-Fresh clone to working local stack:
+## What This Proves
 
-```bash
-cp .env.example .env
-make genesis           # one-time, captures genesis account ID
-docker compose up -d   # bridge + postgres + anvil + miden-node
-curl http://localhost:8080/healthz
+- Inbound: an Anvil deposit is detected, then the Bridge API submits a
+  solver-signed public P2ID note on Miden testnet for the recipient.
+- Outbound: a user creates a public programmable `BridgeOutV1` note on Miden
+  testnet, the bridge consumes that note, then releases funds on Anvil.
+- Restart recovery: a quote in `PROCESSING` survives a bridge container restart
+  and resumes from durable transaction ids.
+- Evidence logging: E2E runs print correlation ids, Miden tx ids, EVM tx hashes,
+  and lifecycle evidence.
+
+This does not prove Sepolia yet. Sepolia requires live RPC configuration, funded
+solver liquidity, token registry wiring, and public EVM explorer evidence.
+
+## Bridge Shape
+
+```mermaid
+flowchart LR
+    User["User / solver client"] --> BridgeAPI["Bridge API"]
+    BridgeAPI --> Postgres["Postgres quote state"]
+    BridgeAPI --> Anvil["Anvil EVM"]
+    BridgeAPI --> Miden["Miden testnet via miden-client"]
+    Miden --> Notes["Public Miden notes"]
+    Notes --> Claim["Recipient or bridge consumes note"]
+    Claim --> Final["Release, refund, or wallet balance update"]
 ```
 
-Expected result:
+Inbound completion has two layers:
+
+1. The bridge marks the quote `SUCCESS` after the solver-signed public P2ID note
+   is committed and consumable on Miden.
+2. The recipient completes wallet-side settlement by syncing and consuming that
+   public P2ID note.
+
+Outbound uses public programmable notes because Miden accounts are not reliably
+discoverable before they have sent a transaction. The bridge therefore watches
+for a public `BridgeOutV1` note targeted to the stable bridge account instead of
+deriving one deposit account per quote.
+
+## Prerequisites
+
+- Docker with Compose v2.
+- Rust toolchain compatible with edition 2024. The Docker CI path uses
+  `rust:1.93-slim`.
+- OpenSSL for the seed-generation helper used below.
+- Network access to `https://rpc.testnet.miden.io`.
+- Enough time for public testnet bootstrap and confirmations. A full serialized
+  E2E run took about 14 minutes in the recorded evidence run.
+
+No local Miden node is required for the supported path. The bridge uses
+`miden-client` network defaults for Miden testnet, including the native remote
+transaction prover configuration.
+
+## Clone And Start
+
+```bash
+git clone https://github.com/BrianSeong99/miden-testnet-bridge.git
+cd miden-testnet-bridge
+cp .env.example .env
+```
+
+Set a unique Miden master seed before starting the bridge. Do not reuse the
+placeholder across public testnet runs; reusing the same seed reuses the same
+solver account and can cause account commitment conflicts after that account has
+advanced on-chain.
+
+```bash
+perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
+```
+
+The checked-in `.env.example` is Compose-oriented. If you run host-side cargo
+tests directly against Anvil, set `EVM_RPC_URL=http://localhost:8545` in that
+shell instead of sourcing the Compose `.env`.
+
+Start the default stack:
+
+```bash
+docker compose up -d --build
+```
+
+Wait for the bridge to become healthy. Bootstrap submits several Miden testnet
+transactions, so the first healthy response can take a few minutes.
+
+```bash
+curl -i http://localhost:8080/healthz
+curl -s http://localhost:8080/v0/tokens
+```
+
+Tear down local state when you want a clean run:
+
+```bash
+docker compose down --volumes --remove-orphans
+```
+
+## Reproduce The E2E Evidence
+
+Run the non-E2E regression set first:
+
+```bash
+cargo fmt --check
+cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
+```
+
+Run the full public-testnet E2E suite:
+
+```bash
+RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocapture --test-threads=1 2>&1 | tee e2e.log
+```
+
+Expected shape:
 
 ```text
-ok
+test result: ok. 5 passed; 0 failed
 ```
 
-`make genesis` is idempotent. After the first run, the Docker volumes keep the Miden chain state, bootstrap accounts, bridge-side Miden store, Anvil state, and Postgres data.
-
-For the Mac Studio homelab override, opt in explicitly:
+Extract the evidence lines:
 
 ```bash
-docker compose -f compose.yaml -f compose.local.yml up -d
+grep -E 'E2E_EVIDENCE|test result:' e2e.log
 ```
 
-## What Runs
+The recorded evidence run for this pivot produced:
 
-- `bridge`: Axum HTTP service on `http://localhost:8080`
-- `postgres`: quote state, lifecycle events, chain artifacts, Miden bootstrap records
-- `anvil`: local EVM chain on `http://localhost:8545`
-- `anvil-init`: one-shot token/bootstrap funding job
-- `miden-node`: local Miden RPC on `http://localhost:57291`
-
-## Cutover
-
-When NEAR’s real 1Click endpoint goes live, consumers do not change paths or payloads. They flip one environment variable to the new base URL:
-
-- Base URL to use: `https://1click.chaindefuser.com`
-- Do not include `/v0` in the env var value
-- Clients keep appending paths such as `/v0/tokens`, `/v0/quote`, and `/v0/status`
-
-Wallet-team cutover steps:
-
-1. Find the consumer-side env var or config entry that currently points at this bridge base URL, for example `http://localhost:8080`.
-2. Replace only the base URL value with `https://1click.chaindefuser.com`.
-3. Leave request code unchanged so the client still calls path-suffixed routes like `/v0/tokens`.
-4. Restart or redeploy the consumer so the new base URL is loaded.
-5. Verify the swap took effect with a `/v0/tokens` round-trip.
-
-Verification:
-
-```bash
-export ONECLICK_BASE_URL="https://1click.chaindefuser.com"
-curl -fsS "${ONECLICK_BASE_URL}/v0/tokens" | jq '.[0]'
+```text
+test result: ok. 5 passed; 0 failed; finished in 822.50s
 ```
 
-If the env var is set to `https://1click.chaindefuser.com/v0`, clients that append `/v0/tokens` will incorrectly request `/v0/v0/tokens`. The env var must hold the base URL only.
+The current static evidence report is checked in at
+`docs/smoke-test-report.html` and published here:
 
-Sunset and consumer migration details live in [docs/SUNSET.md](docs/SUNSET.md).
+```text
+https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html
+```
+
+## Flow Details
+
+### Inbound: EVM To Miden
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Anvil
+    participant BridgeAPI as Bridge API
+    participant MidenTestnet
+    participant Recipient
+
+    User->>BridgeAPI: POST /v0/quote eth-anvil:eth -> miden-local:eth
+    BridgeAPI-->>User: EVM depositAddress
+    User->>Anvil: send ETH to depositAddress
+    BridgeAPI->>Anvil: detect and confirm deposit
+    BridgeAPI->>BridgeAPI: KNOWN_DEPOSIT_TX -> PENDING_DEPOSIT -> PROCESSING
+    BridgeAPI->>MidenTestnet: submit solver-signed public P2ID mint to recipient
+    MidenTestnet-->>BridgeAPI: public P2ID note committed and consumable
+    BridgeAPI->>BridgeAPI: append miden_mint_tx_id and mark quote SUCCESS
+    Recipient->>MidenTestnet: sync public note targeted to recipient account
+    Recipient->>MidenTestnet: consume and claim P2ID note
+    MidenTestnet-->>Recipient: recipient balance updated
+```
+
+### Outbound: Miden To EVM
+
+```mermaid
+sequenceDiagram
+    participant UserClient
+    participant BridgeAPI as Bridge API
+    participant MidenTestnet
+    participant BridgePoller
+    participant Anvil
+
+    UserClient->>BridgeAPI: POST /v0/quote miden-local:eth -> eth-anvil:eth
+    BridgeAPI-->>UserClient: stable bridge account plus BridgeOutV1 depositMemo
+    UserClient->>MidenTestnet: create public BridgeOutV1 note with assets
+    BridgePoller->>MidenTestnet: sync and scan public notes
+    BridgePoller->>BridgePoller: validate target account, quote hash, faucet, amount
+    BridgePoller->>MidenTestnet: consume matched note with bridge account
+    MidenTestnet-->>BridgePoller: consume tx committed
+    BridgePoller->>Anvil: release funds to EVM recipient
+    BridgePoller->>BridgeAPI: persist tx ids and mark SUCCESS
+```
+
+### Restart Recovery
+
+```mermaid
+flowchart TD
+    A["Quote is PROCESSING"] --> B["Bridge container restarts"]
+    B --> C["Reload non-terminal quote from Postgres"]
+    C --> D{"Durable Miden tx id exists?"}
+    D -->|Yes| E["Wait for existing tx confirmation"]
+    D -->|No| F{"Only idempotency key exists?"}
+    F -->|Yes| G["Treat as interrupted before durable submit"]
+    F -->|No| H["Submit Miden tx"]
+    G --> H
+    H --> I["Persist Miden tx id"]
+    E --> J["Mark SUCCESS after confirmation"]
+    I --> J
+```
 
 ## Environment
 
-Copy `.env.example` to `.env`, then override only what you need:
-
-```bash
-cp .env.example .env
-```
-
-The "Default" column is what the binary falls back to when the variable is unset. `.env.example` ships with developer-friendly localhost values for the host-mode dev path; container deployments rely on the binary fallbacks.
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `DATABASE_URL` | `postgres://postgres:postgres@postgres:5432/miden_bridge` | Postgres DSN used by the bridge container. |
-| `MIDEN_RPC_URL` | `http://localhost:57291` | Miden RPC URL for host-side runs; Compose overrides this to `http://miden-node:57291` inside the bridge container. |
-| `MIDEN_STORE_DIR` | `./.miden-store` | Host-run Miden client store path; Compose overrides this to `/var/lib/bridge/miden-store`. |
-| `MIDEN_MASTER_SEED_HEX` | `0101010101010101010101010101010101010101010101010101010101010101` | 32-byte hex seed used to derive deterministic Miden accounts for bootstrap and outbound deposit accounts. |
-| `EVM_RPC_URL` | `http://host.docker.internal:8545` | Binary fallback for reaching a host-run Anvil node from containerized bridge runs; `.env.example` uses `http://localhost:8545` for host-mode development. |
-| `MASTER_MNEMONIC` | `abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about` | Deterministic master mnemonic used to derive per-quote EVM deposit addresses. |
-| `SOLVER_PRIVATE_KEY` | `replace-with-solver-private-key` | Binary fallback placeholder; set this explicitly in real runs. `.env.example` uses a local Anvil key for host-mode development. |
-| `EVM_CHAIN_ID` | `271828` | Chain ID expected from the local Anvil instance. |
-| `EVM_TOKEN_ADDRESSES_PATH` | `/state/token-addresses.json` | JSON file written by `anvil-init` that maps mock ERC-20 symbols to deployed token addresses. |
-| `BRIDGE_HTTP_PORT` | `8080` | Host port exposed by the bridge HTTP server. |
-| `RUST_LOG` | `info,sqlx=warn,hyper=warn,tower_http=warn` | Tracing filter for the bridge process. |
-| `LOG_FORMAT` | `json` | Bridge log output format: `json` or `pretty`. |
-| `DEADLINE_SCAN_INTERVAL_SECS` | `30` | Poll interval for the deadline-expiry scanner and stuck-`PROCESSING` watchdog. |
+| Variable | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Yes | `postgres://postgres:postgres@postgres:5432/miden_bridge` | Postgres DSN used by the bridge service. |
+| `MIDEN_RPC_URL` | Yes | `https://rpc.testnet.miden.io` | Public Miden testnet RPC endpoint. Set to `http://miden-node:57291` only for legacy local-node mode. |
+| `MIDEN_REMOTE_PROVER_URL` | No | Native `miden-client` testnet/devnet default | Optional remote transaction prover override. Public testnet works without setting this. |
+| `MIDEN_REMOTE_PROVER_TIMEOUT_SECS` | No | `10` | Timeout for remote transaction prover requests. |
+| `MIDEN_MASTER_SEED_HEX` | Yes for reproducible public testnet runs | Compose fallback is a fixed test seed | 32-byte hex seed used to derive the deterministic Miden solver and faucet accounts. Use a fresh value for each public testnet run. |
+| `MIDEN_STORE_DIR` | Yes | `/var/lib/bridge/miden-store` in Compose, `./.miden-store` for host runs | Persistent SQLite store plus keystore for the Rust Miden client. |
+| `EVM_RPC_URL` | Yes | `http://anvil:8545` in Compose | EVM RPC endpoint. The validated E2E path uses local Anvil. |
+| `MASTER_MNEMONIC` | Yes | Anvil default mnemonic in Compose | Seed material for deterministic EVM quote wallet derivation. |
+| `SOLVER_PRIVATE_KEY` | Yes | Anvil default account key in Compose | Solver-side EVM key used for local Anvil release and refund transactions. |
+| `EVM_CHAIN_ID` | No | `271828` | Local Anvil chain id. |
+| `EVM_TOKEN_ADDRESSES_PATH` | No | `/state/token-addresses.json` | Address file produced by `anvil-init`. |
+| `BRIDGE_HTTP_PORT` | No | `8080` | Host port exposed by the bridge service. |
+| `BRIDGE_PRICER` | No | CoinGecko default when unset | E2E harness sets `mock` for deterministic quotes. |
+| `RUST_LOG` | No | `info,sqlx=warn,hyper=warn,tower_http=warn` in Compose | Tracing filter. |
+| `LOG_FORMAT` | No | `json` | `json` or `pretty`. |
 
 ## Local CI
 
-`bash scripts/ci.sh` is the merge gate for this repo. Run it before review and before push:
+Run the Dockerized local gate before opening or updating a PR:
 
 ```bash
 bash scripts/ci.sh
 ```
 
-It runs:
-
-- `cargo fmt --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo build --locked`
-- `cargo test --locked`
-
-## E2E Tests
-
-Run the end-to-end suite against a live local stack:
+Run the E2E suite separately because it talks to public Miden testnet:
 
 ```bash
-make genesis
 make e2e
 ```
 
-`make e2e` runs:
+The E2E tests are serialized by design. Each test creates fresh Miden testnet
+accounts and uses the native `miden-client` remote prover path.
+
+## Publishing The Evidence Page
+
+Maintainers can publish `docs/smoke-test-report.html` through GitHub Pages from
+the `gh-pages` branch:
 
 ```bash
-RUN_E2E=1 cargo test --test e2e -- --test-threads=1
+pages_dir=/tmp/miden-testnet-bridge-gh-pages
+rm -rf "$pages_dir"
+git fetch origin gh-pages
+git worktree add -B gh-pages "$pages_dir" origin/gh-pages
+mkdir -p "$pages_dir/docs"
+cp docs/smoke-test-report.html "$pages_dir/docs/smoke-test-report.html"
+cd "$pages_dir"
+git add docs/smoke-test-report.html
+git commit -m "docs: update smoke test report [skip ci]"
+git push origin gh-pages
+cd -
+git worktree remove "$pages_dir"
+git branch -D gh-pages
 ```
 
-The `--test-threads=1` requirement is intentional. The E2E suite shares Docker services and persistent chain state, so it must run serially.
+Triggering a Pages rebuild is optional, but useful when checking propagation:
 
-## Operations
+```bash
+gh api -X POST repos/:owner/:repo/pages/builds --jq '{status:.status,url:.url}'
+```
 
-- Runbook: [docs/RUNBOOK.md](docs/RUNBOOK.md)
-- Sunset and cutover plan: [docs/SUNSET.md](docs/SUNSET.md)
-- Architecture diagrams: [docs/architecture.md](docs/architecture.md)
-- OpenAPI snapshot: [docs/openapi.yaml](docs/openapi.yaml)
+## Local-Node Mode
 
-## Milestone
+Local-node mode is legacy/manual only. It is useful for isolated experiments, not
+for the accepted bridge evidence.
 
-- GitHub milestone: <https://github.com/BrianSeong99/miden-testnet-bridge/milestone/1>
+Seed the local Miden node:
+
+```bash
+make genesis
+```
+
+Point the bridge to the local node and start the profile-gated services:
+
+```bash
+MIDEN_RPC_URL=http://miden-node:57291 docker compose --profile local-node up -d
+```
+
+Run the local-node E2E fallback:
+
+```bash
+make e2e-local-node
+```
+
+## Troubleshooting
+
+- `incorrect account initial commitment`: use a fresh `MIDEN_MASTER_SEED_HEX` and
+  a clean `MIDEN_STORE_DIR` or clean Compose volumes.
+- Slow `bridge` healthcheck: public Miden testnet bootstrap submits several
+  transactions. Give it the full startup window before assuming failure.
+- Missing E2E tests: set `RUN_E2E=1`. The suite intentionally skips without it.
+- E2E debug assertion failures: keep `RUSTFLAGS='-C debug-assertions=no'` visible
+  until the upstream Miden debug-assertion issue is removed from the path.
+- Sepolia claims: do not report Sepolia as validated unless the run includes live
+  Sepolia tx hashes, funded solver balances, and final status evidence.
+
+## More Detail
+
+See `docs/E2E_HANDOFF.md` for the implementation handoff, evidence ids, residual
+risks, and next Sepolia milestone.

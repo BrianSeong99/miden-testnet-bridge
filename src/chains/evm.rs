@@ -24,7 +24,7 @@ use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::interval;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -203,6 +203,14 @@ impl EvmClient {
             .await
             .with_context(|| format!("failed to send {} transaction", persisted.action))?;
         let tx_hash = *pending.tx_hash();
+        info!(
+            %correlation_id,
+            action = persisted.action,
+            to = %to,
+            amount = %amount,
+            tx_hash = %format!("{tx_hash:#x}"),
+            "submitted EVM transaction"
+        );
         let idempotency_key = format!("{}_{tx_hash:#x}", persisted.idempotency_prefix);
         if self
             .store
@@ -224,6 +232,12 @@ impl EvmClient {
             .watch()
             .await
             .with_context(|| format!("failed waiting for {} confirmation", persisted.action))?;
+        info!(
+            %correlation_id,
+            action = persisted.action,
+            tx_hash = %format!("{tx_hash:#x}"),
+            "confirmed EVM transaction"
+        );
         Ok(tx_hash)
     }
 
@@ -321,9 +335,6 @@ impl EvmClient {
                 "KNOWN_DEPOSIT_TX" => {
                     self.handle_confirmed_deposit(&quote, latest_block, lifecycle.clone())
                         .await?;
-                }
-                "PROCESSING" => {
-                    lifecycle.settle(quote.correlation_id).await?;
                 }
                 _ => {}
             }

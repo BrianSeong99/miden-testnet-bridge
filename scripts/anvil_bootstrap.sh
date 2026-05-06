@@ -23,9 +23,13 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-USDC_ADDRESS="$(cast compute-address --nonce 0 "${DEPLOYER_ADDRESS}")"
-USDT_ADDRESS="$(cast compute-address --nonce 1 "${DEPLOYER_ADDRESS}")"
-BTC_ADDRESS="$(cast compute-address --nonce 2 "${DEPLOYER_ADDRESS}")"
+compute_contract_address() {
+  cast compute-address --nonce "$1" "${DEPLOYER_ADDRESS}" | awk '{print $NF}'
+}
+
+USDC_ADDRESS="$(compute_contract_address 0)"
+USDT_ADDRESS="$(compute_contract_address 1)"
+BTC_ADDRESS="$(compute_contract_address 2)"
 SOLVER_ADDRESS="$(cast wallet address --private-key "${SOLVER_PRIVATE_KEY}")"
 
 write_token_file() {
@@ -38,15 +42,29 @@ code_at() {
   cast code "$1" --rpc-url "${RPC_URL}" 2>/dev/null || true
 }
 
+fund_solver() {
+  cast send "${SOLVER_ADDRESS}" --value "${SOLVER_ETH_FUND}" --rpc-url "${RPC_URL}" \
+    --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
+  cast send "${USDC_ADDRESS}" "transfer(address,uint256)" "${SOLVER_ADDRESS}" "${SOLVER_TOKEN_FUND}" \
+    --rpc-url "${RPC_URL}" --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
+  cast send "${USDT_ADDRESS}" "transfer(address,uint256)" "${SOLVER_ADDRESS}" "${SOLVER_TOKEN_FUND}" \
+    --rpc-url "${RPC_URL}" --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
+  cast send "${BTC_ADDRESS}" "transfer(address,uint256)" "${SOLVER_ADDRESS}" "${SOLVER_TOKEN_FUND}" \
+    --rpc-url "${RPC_URL}" --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
+}
+
 if [[ "$(code_at "${USDC_ADDRESS}")" != "0x" ]] \
   && [[ "$(code_at "${USDT_ADDRESS}")" != "0x" ]] \
   && [[ "$(code_at "${BTC_ADDRESS}")" != "0x" ]]; then
+  fund_solver
   write_token_file
   exit 0
 fi
 
 forge create "${PROJECT_ROOT}/contracts/MockERC20.sol:MockERC20" \
   --root "${PROJECT_ROOT}" \
+  --out /tmp/forge-out \
+  --cache-path /tmp/forge-cache \
   --rpc-url "${RPC_URL}" \
   --private-key "${BOOTSTRAP_PRIVATE_KEY}" \
   --broadcast \
@@ -54,6 +72,8 @@ forge create "${PROJECT_ROOT}/contracts/MockERC20.sol:MockERC20" \
 
 forge create "${PROJECT_ROOT}/contracts/MockERC20.sol:MockERC20" \
   --root "${PROJECT_ROOT}" \
+  --out /tmp/forge-out \
+  --cache-path /tmp/forge-cache \
   --rpc-url "${RPC_URL}" \
   --private-key "${BOOTSTRAP_PRIVATE_KEY}" \
   --broadcast \
@@ -61,18 +81,13 @@ forge create "${PROJECT_ROOT}/contracts/MockERC20.sol:MockERC20" \
 
 forge create "${PROJECT_ROOT}/contracts/MockERC20.sol:MockERC20" \
   --root "${PROJECT_ROOT}" \
+  --out /tmp/forge-out \
+  --cache-path /tmp/forge-cache \
   --rpc-url "${RPC_URL}" \
   --private-key "${BOOTSTRAP_PRIVATE_KEY}" \
   --broadcast \
   --constructor-args "Mock Bitcoin" "BTC" 8 "${BTC_SUPPLY}" >/dev/null
 
-cast send "${SOLVER_ADDRESS}" --value "${SOLVER_ETH_FUND}" --rpc-url "${RPC_URL}" \
-  --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
-cast send "${USDC_ADDRESS}" "transfer(address,uint256)" "${SOLVER_ADDRESS}" "${SOLVER_TOKEN_FUND}" \
-  --rpc-url "${RPC_URL}" --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
-cast send "${USDT_ADDRESS}" "transfer(address,uint256)" "${SOLVER_ADDRESS}" "${SOLVER_TOKEN_FUND}" \
-  --rpc-url "${RPC_URL}" --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
-cast send "${BTC_ADDRESS}" "transfer(address,uint256)" "${SOLVER_ADDRESS}" "${SOLVER_TOKEN_FUND}" \
-  --rpc-url "${RPC_URL}" --private-key "${BOOTSTRAP_PRIVATE_KEY}" >/dev/null
+fund_solver
 
 write_token_file

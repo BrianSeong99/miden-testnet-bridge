@@ -1,6 +1,7 @@
 use std::{
     process::Command,
     str::FromStr,
+    sync::OnceLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -13,10 +14,8 @@ use alloy::{
 };
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use miden_client::{
-    account::Account,
-    auth::AuthSecretKey,
-    keystore::Keystore,
-    transaction::{PaymentNoteDescription, TransactionRequestBuilder},
+    account::Account, auth::AuthSecretKey, keystore::Keystore,
+    transaction::TransactionRequestBuilder,
 };
 use miden_testnet_bridge::{
     chains::{
@@ -24,8 +23,8 @@ use miden_testnet_bridge::{
         miden_bootstrap::{
             BootstrapState, bootstrap_state_from_record, sync_with_retry, wait_for_tx,
         },
+        miden_bridge_note::{BridgeOutDepositMemo, build_bridge_out_note},
         miden_deposit_account::build_wallet_account,
-        miden_inbound::mint_to_user,
     },
     core::state::{PostgresStateStore, StateStore, connect_pool},
     types::{QuoteResponse, StatusResponse, SwapStatus},
@@ -43,6 +42,8 @@ use uuid::Uuid;
 const DEFAULT_FUNDED_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const DEFAULT_EVM_REFUND_ADDRESS: &str = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
+pub const LOCAL_ETH_E2E_AMOUNT: u128 = 1_000_000_000_000;
+pub const LOCAL_ETH_E2E_AMOUNT_STR: &str = "1000000000000";
 
 #[derive(Clone, Copy)]
 pub enum Direction {
@@ -72,6 +73,7 @@ pub struct TestContext {
     pub miden: MidenClient,
     pub _miden_store: TempDir,
     envs: Vec<(String, String)>,
+    seed_namespace: String,
 }
 
 #[allow(dead_code)]
@@ -88,16 +90,40 @@ pub fn run_e2e_enabled() -> bool {
     std::env::var("RUN_E2E").ok().as_deref() == Some("1")
 }
 
+pub fn skip_e2e_reason() -> Option<String> {
+    if !run_e2e_enabled() {
+        return Some("set RUN_E2E=1".to_owned());
+    }
+
+    static DOCKER_CHECK: OnceLock<Option<String>> = OnceLock::new();
+    DOCKER_CHECK
+        .get_or_init(|| {
+            docker_access_check()
+                .err()
+                .map(|message| message.to_string())
+        })
+        .clone()
+}
+
+pub fn require_e2e(test_name: &str) {
+    if let Some(reason) = skip_e2e_reason() {
+        panic!("skip: {test_name} requires live e2e prerequisites; {reason}");
+    }
+}
+
 pub async fn start_test(test_name: &str) -> Result<TestContext> {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time went backwards")
         .as_nanos();
     let miden_store_dir = format!("/var/lib/bridge/miden-store/{test_name}-{unique}");
-    let envs = vec![("MIDEN_STORE_DIR".to_owned(), miden_store_dir)];
+    let miden_master_seed_hex = hex_seed32(&format!("{test_name}:{unique}:bridge-master"));
+    let envs = vec![
+        ("MIDEN_STORE_DIR".to_owned(), miden_store_dir),
+        ("MIDEN_MASTER_SEED_HEX".to_owned(), miden_master_seed_hex),
+    ];
 
     compose_down_with_env(&envs)?;
-    ensure_genesis()?;
     compose_up_with_env(&envs)?;
     wait_for_healthz().await?;
 
@@ -119,6 +145,7 @@ pub async fn start_test(test_name: &str) -> Result<TestContext> {
         miden,
         _miden_store: miden_store,
         envs,
+        seed_namespace: format!("{test_name}:{unique}"),
     })
 }
 
@@ -175,10 +202,11 @@ impl TestContext {
     pub async fn poll_status_until(
         &self,
         deposit_address: &str,
+        deposit_memo: Option<&str>,
         target_status: SwapStatus,
         timeout: Duration,
     ) -> Result<StatusResponse> {
-        poll_status_until(deposit_address, target_status, timeout).await
+        poll_status_until(deposit_address, deposit_memo, target_status, timeout).await
     }
 
     pub async fn restart_bridge(&self) -> Result<()> {
@@ -188,7 +216,7 @@ impl TestContext {
             &self.envs,
             Some("failed to restart bridge"),
         )?;
-        wait_for_healthz().await
+        wait_for_healthz_with_timeout(Duration::from_secs(600)).await
     }
 
     pub async fn bootstrap_state(&self) -> Result<BootstrapState> {
@@ -202,28 +230,9 @@ impl TestContext {
     }
 
     pub async fn create_wallet(&self, label: &str) -> Result<Account> {
-        let init_seed = seed32(&format!("{label}:init"));
-        let auth_seed = seed32(&format!("{label}:auth"));
+        let init_seed = seed32(&format!("{}:{label}:init", self.seed_namespace));
+        let auth_seed = seed32(&format!("{}:{label}:auth", self.seed_namespace));
         create_wallet(&self.miden, init_seed, auth_seed).await
-    }
-
-    pub async fn mint_to_wallet(
-        &self,
-        bootstrap: &BootstrapState,
-        wallet: &Account,
-        asset: &str,
-        amount: u64,
-    ) -> Result<()> {
-        let faucet_id = bootstrap.faucet_id_for_asset(asset)?;
-        mint_to_user(
-            &self.miden,
-            bootstrap.solver_account_id,
-            faucet_id,
-            wallet.id(),
-            amount,
-        )
-        .await
-        .map(|_| ())
     }
 
     pub async fn send_outbound_note(
@@ -231,26 +240,28 @@ impl TestContext {
         bootstrap: &BootstrapState,
         sender: &Account,
         deposit_address: &str,
+        deposit_memo: &str,
         amount: u64,
     ) -> Result<()> {
-        let deposit_account_id = parse_account_id(deposit_address)?;
+        let memo = BridgeOutDepositMemo::from_deposit_memo(deposit_memo)?;
+        ensure!(
+            parse_account_id(&memo.bridge_account_id)? == parse_account_id(deposit_address)?,
+            "deposit address and bridge-note memo target differ"
+        );
         let mut inner = self.miden.open().await?;
         consume_notes(&mut inner, sender.id()).await?;
-        let request = TransactionRequestBuilder::new().build_pay_to_id(
-            PaymentNoteDescription::new(
-                vec![
-                    miden_client::asset::FungibleAsset::new(
-                        bootstrap.eth_faucet_account_id,
-                        amount,
-                    )?
+        let note = build_bridge_out_note(
+            sender.id(),
+            vec![
+                miden_client::asset::FungibleAsset::new(bootstrap.eth_faucet_account_id, amount)?
                     .into(),
-                ],
-                sender.id(),
-                deposit_account_id,
-            ),
-            miden_client::note::NoteType::Private,
+            ],
+            &memo,
             inner.rng(),
         )?;
+        let request = TransactionRequestBuilder::new()
+            .own_output_notes(vec![note])
+            .build()?;
         let tx_id = inner.submit_new_transaction(sender.id(), request).await?;
         wait_for_tx(&mut inner, tx_id).await
     }
@@ -354,7 +365,7 @@ pub fn database_url() -> String {
 }
 
 pub fn miden_rpc_url() -> String {
-    std::env::var("MIDEN_RPC_URL").unwrap_or_else(|_| "http://localhost:57291".to_owned())
+    std::env::var("MIDEN_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.miden.io".to_owned())
 }
 
 pub fn evm_rpc_url() -> String {
@@ -376,8 +387,16 @@ pub fn compose_down() -> Result<()> {
 }
 
 pub async fn wait_for_healthz() -> Result<()> {
+    wait_for_healthz_with_timeout(Duration::from_secs(300)).await
+}
+
+async fn wait_for_healthz_with_timeout(timeout: Duration) -> Result<()> {
     let client = reqwest::Client::new();
-    let deadline = Instant::now() + Duration::from_secs(60);
+    // Bridge bootstrap (faucet deploys + solver liquidity mints + consumes)
+    // takes ~60-90s on cold boot. Compose --wait already gates on the bridge
+    // healthcheck (5min start_period), but the test harness then double-checks
+    // by hitting /healthz + /v0/tokens itself. 5min cap matches compose.
+    let deadline = Instant::now() + timeout;
     let health_url = format!("{}/healthz", bridge_url());
     let tokens_url = format!("{}/v0/tokens", bridge_url());
     loop {
@@ -422,19 +441,24 @@ pub async fn make_quote(payload: Value) -> Result<QuoteResponse> {
 
 pub async fn poll_status_until(
     deposit_address: &str,
+    deposit_memo: Option<&str>,
     target_status: SwapStatus,
     timeout: Duration,
 ) -> Result<StatusResponse> {
     let client = reqwest::Client::new();
     let deadline = Instant::now() + timeout;
-    let url = format!(
-        "{}/v0/status?depositAddress={}",
-        bridge_url(),
-        deposit_address
-    );
     loop {
+        let mut url = url::Url::parse(&format!("{}/v0/status", bridge_url()))
+            .context("failed to build status URL")?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("depositAddress", deposit_address);
+            if let Some(deposit_memo) = deposit_memo {
+                query.append_pair("depositMemo", deposit_memo);
+            }
+        }
         let response = client
-            .get(&url)
+            .get(url)
             .send()
             .await
             .context("status request failed")?;
@@ -465,7 +489,7 @@ pub async fn wait_for_intermediate_status(
     target_status: SwapStatus,
     timeout: Duration,
 ) -> Result<StatusResponse> {
-    poll_status_until(deposit_address, target_status, timeout).await
+    poll_status_until(deposit_address, None, target_status, timeout).await
 }
 
 pub async fn send_native_eth(to: &str, amount: u128) -> Result<()> {
@@ -508,6 +532,12 @@ pub fn assert_status_subsequence(actual: &[String], expected: &[&str]) {
 }
 
 fn compose_up_with_env(envs: &[(String, String)]) -> Result<()> {
+    let mut compose_envs = vec![("BRIDGE_PRICER".to_owned(), "mock".to_owned())];
+    compose_envs.extend_from_slice(envs);
+
+    // Testnet bootstrap submits several Miden transactions. The remote prover
+    // removes local proving cost, but public testnet confirmation can still
+    // exceed Docker Compose's default 60s --wait timeout.
     run_command(
         "docker",
         &[
@@ -518,18 +548,21 @@ fn compose_up_with_env(envs: &[(String, String)]) -> Result<()> {
             "-d",
             "--build",
             "--wait",
+            "--wait-timeout",
+            "600",
         ],
-        envs,
+        &compose_envs,
         Some("docker compose up failed"),
     )
 }
 
 fn compose_down_with_env(envs: &[(String, String)]) -> Result<()> {
-    run_command("docker", &["compose", "down", "--volumes"], envs, None)
-}
-
-fn ensure_genesis() -> Result<()> {
-    run_command("make", &["genesis"], &[], Some("make genesis failed"))
+    run_command(
+        "docker",
+        &["compose", "down", "--volumes", "--remove-orphans"],
+        envs,
+        None,
+    )
 }
 
 fn run_command(
@@ -560,6 +593,25 @@ fn run_command(
         stdout.trim(),
         stderr.trim()
     ))
+}
+
+fn docker_access_check() -> Result<()> {
+    let output = Command::new("docker")
+        .args(["info"])
+        .output()
+        .context("failed to spawn docker info")?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = stderr
+        .lines()
+        .chain(stdout.lines())
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("docker daemon unavailable");
+    Err(anyhow!("requires Docker daemon access: {detail}"))
 }
 
 async fn create_wallet(
@@ -602,6 +654,10 @@ async fn consume_notes(
 fn seed32(label: &str) -> [u8; 32] {
     let digest = Sha256::digest(label.as_bytes());
     digest.into()
+}
+
+fn hex_seed32(label: &str) -> String {
+    alloy::hex::encode(seed32(label))
 }
 
 fn json_value_to_vec(value: Value) -> Result<Vec<String>> {

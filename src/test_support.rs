@@ -1,12 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
+use miden_client::account::{AccountId, AccountStorageMode, AccountType};
 use serde_json::Value;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
+    chains::miden::is_miden_asset_id,
     core::state::{
         DeadlineScanQuote, DynStateStore, EvmTrackedQuote, MidenBootstrapRecord, MidenTrackedQuote,
         QuoteRecord, StateStore, StateStoreError, StuckProcessingQuote, TxHashColumn,
@@ -47,6 +49,27 @@ pub fn failing_memory_state() -> DynStateStore {
         state: Arc::new(Mutex::new(MemoryStoreState::default())),
         ping_ok: false,
     })
+}
+
+pub fn test_miden_account_id(
+    account_type: AccountType,
+    storage_mode: AccountStorageMode,
+    random: u32,
+) -> AccountId {
+    const TYPE_SHIFT: u64 = 4;
+    const STORAGE_MODE_SHIFT: u64 = 6;
+
+    let mut prefix = 0_u64;
+    prefix |= (account_type as u64) << TYPE_SHIFT;
+    prefix |= (storage_mode as u64) << STORAGE_MODE_SHIFT;
+    prefix |= ((random & 0xff00_0000) as u64) << 32;
+    prefix |= ((random & 0x00ff_0000) as u64) >> 8;
+
+    let mut id = (prefix as u128) << 64;
+    id |= ((random & 0x0000_ff00) as u128) << 32;
+    id |= ((random & 0x0000_00ff) as u128) << 8;
+
+    AccountId::try_from(id).expect("test account ID layout should be valid")
 }
 
 #[async_trait]
@@ -265,12 +288,19 @@ impl StateStore for MemoryStateStore {
             .quotes
             .values()
             .filter_map(|quote| {
-                let account_id = quote.miden_deposit_account_id.clone()?;
-                let seed_hex = quote.miden_deposit_seed_hex.clone()?;
                 if !matches!(
                     quote.status.as_str(),
                     "PENDING_DEPOSIT" | "KNOWN_DEPOSIT_TX" | "PROCESSING"
                 ) {
+                    return None;
+                }
+                if !is_miden_asset_id(&quote.quote_request.origin_asset) {
+                    return None;
+                }
+                let has_legacy_account = quote.miden_deposit_account_id.is_some()
+                    && quote.miden_deposit_seed_hex.is_some();
+                let has_bridge_note = quote.quote_response.quote.deposit_memo.is_some();
+                if !has_legacy_account && !has_bridge_note {
                     return None;
                 }
                 Some(MidenTrackedQuote {
@@ -281,13 +311,14 @@ impl StateStore for MemoryStateStore {
                         .deposit_address
                         .clone()
                         .expect("memory quote should have deposit address"),
+                    deposit_memo: quote.quote_response.quote.deposit_memo.clone(),
                     origin_asset: quote.quote_request.origin_asset.clone(),
                     destination_asset: quote.quote_request.destination_asset.clone(),
                     recipient: quote.quote_request.recipient.clone(),
                     amount_in: quote.quote_response.quote.amount_in.clone(),
                     status: quote.status.clone(),
-                    miden_deposit_account_id: account_id,
-                    miden_deposit_seed_hex: seed_hex,
+                    miden_deposit_account_id: quote.miden_deposit_account_id.clone(),
+                    miden_deposit_seed_hex: quote.miden_deposit_seed_hex.clone(),
                     evm_release_tx_hashes: quote.evm_release_tx_hashes.clone(),
                     miden_consume_tx_ids: quote.miden_consume_tx_ids.clone(),
                 })

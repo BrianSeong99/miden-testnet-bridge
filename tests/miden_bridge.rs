@@ -219,9 +219,13 @@ async fn outbound_flow_consumes_note_and_releases_on_evm() {
         .into_iter()
         .next()
         .expect("tracked outbound quote");
-    let deposit_account_id =
-        miden_client::account::AccountId::from_hex(&quote.miden_deposit_account_id)
-            .expect("deposit account id");
+    let deposit_account_id = miden_client::account::AccountId::from_hex(
+        quote
+            .miden_deposit_account_id
+            .as_deref()
+            .expect("legacy deposit account id"),
+    )
+    .expect("deposit account id");
 
     let sender = create_wallet(miden.as_ref(), [11u8; 32], [12u8; 32])
         .await
