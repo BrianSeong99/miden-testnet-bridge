@@ -237,18 +237,18 @@
       <pre class="mermaid">sequenceDiagram
     participant User
     participant Anvil
-    participant Bridge
+    participant BridgeAPI as Bridge API
     participant Miden
     participant Recipient
 
-    User->>Bridge: Request quote eth-anvil:eth to miden-local:eth
-    Bridge-->>User: Return EVM deposit address
+    User->>BridgeAPI: Request quote eth-anvil:eth to miden-local:eth
+    BridgeAPI-->>User: Return EVM deposit address
     User->>Anvil: Send deposit tx
-    Bridge->>Anvil: Detect and confirm deposit
-    Bridge->>Bridge: Move quote to PROCESSING
-    Bridge->>Miden: Submit public P2ID mint tx
-    Miden-->>Bridge: Mint tx committed
-    Bridge->>Bridge: Persist Miden tx id and mark SUCCESS
+    BridgeAPI->>Anvil: Detect and confirm deposit
+    BridgeAPI->>BridgeAPI: Move quote to PROCESSING
+    BridgeAPI->>Miden: Submit public P2ID mint tx
+    Miden-->>BridgeAPI: Mint tx committed
+    BridgeAPI->>BridgeAPI: Persist Miden tx id and mark SUCCESS
     Recipient->>Miden: Sync and discover public payout note</pre>
     </div>
 
@@ -256,7 +256,7 @@
       <h3>Outbound: Miden public note to EVM release</h3>
       <pre class="mermaid">sequenceDiagram
     participant User
-    participant BridgeAPI
+    participant BridgeAPI as Bridge API
     participant Miden
     participant Poller
     participant Anvil
