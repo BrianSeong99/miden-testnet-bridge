@@ -220,6 +220,12 @@
       per-quote Miden accounts. The bridge watches for a valid note, consumes it on Miden testnet,
       then releases or refunds on the EVM side.
     </p>
+    <p>
+      Inbound is the reverse: after the EVM deposit confirms, the Bridge API uses the configured
+      Miden solver account to create a public P2ID note targeted to the recipient. The bridge marks
+      the quote successful once that mint transaction commits; the recipient completes wallet-side
+      settlement by consuming the public note.
+    </p>
 
     <div class="diagram">
       <h3>Solution overview</h3>
@@ -246,10 +252,13 @@
     User->>Anvil: Send deposit tx
     BridgeAPI->>Anvil: Detect and confirm deposit
     BridgeAPI->>BridgeAPI: Move quote to PROCESSING
-    BridgeAPI->>Miden: Submit public P2ID mint tx
-    Miden-->>BridgeAPI: Mint tx committed
-    BridgeAPI->>BridgeAPI: Persist Miden tx id and mark SUCCESS
-    Recipient->>Miden: Sync and discover public payout note</pre>
+    BridgeAPI->>Miden: Submit solver-signed public P2ID mint to recipient
+    Miden-->>BridgeAPI: Public P2ID note committed and consumable
+    BridgeAPI->>BridgeAPI: Persist Miden mint tx id and mark quote SUCCESS
+    Note over BridgeAPI,Recipient: Bridge success means the payout note exists
+    Recipient->>Miden: Sync public note targeted to recipient account
+    Recipient->>Miden: Consume and claim P2ID note
+    Miden-->>Recipient: Recipient balance updated</pre>
     </div>
 
     <div class="diagram">
@@ -301,7 +310,7 @@
       </thead>
       <tbody>
         <tr>
-          <td>Inbound: Anvil deposit to Miden public P2ID note</td>
+          <td>Inbound: Anvil deposit to solver-signed Miden public P2ID note</td>
           <td class="pass">PASS</td>
           <td><code>862a5ab0-9634-4e8a-85f6-8c336983d55f</code></td>
           <td><a href="https://testnet.midenscan.com/tx/0x73aa5dce46f60e4b267c69361eb459d64b93297110e7d73186c14a1dafa99ac2"><code>0x73aa5dce...afa99ac2</code></a></td>
