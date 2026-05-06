@@ -134,6 +134,26 @@
       border: 1px solid #e6d8aa;
     }
 
+    .diagram {
+      margin: 14px 0 18px;
+      padding: 14px;
+      background: #fff;
+      border: 1px solid #d5d5ce;
+    }
+
+    .diagram h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    .mermaid {
+      margin: 0;
+      padding: 10px;
+      background: #fbfbf7;
+      border: 1px solid #ecece5;
+      overflow-x: auto;
+    }
+
     @media (max-width: 700px) {
       h1 {
         font-size: 28px;
@@ -193,6 +213,80 @@
         </tr>
       </tbody>
     </table>
+
+    <h2>Flow Diagrams</h2>
+    <p>
+      The key change is that Miden-origin deposits use public programmable notes instead of
+      per-quote Miden accounts. The bridge watches for a valid note, consumes it on Miden testnet,
+      then releases or refunds on the EVM side.
+    </p>
+
+    <div class="diagram">
+      <h3>Solution overview</h3>
+      <pre class="mermaid">flowchart LR
+    Old["Old plan: per-quote Miden account"] --> Problem["Problem: account is not visible until it has sent a tx"]
+    Problem --> Pivot["Design pivot"]
+    Pivot --> Note["Public BridgeOutV1 note"]
+    Note --> Storage["NoteStorage commits bridge account and quote hash"]
+    Storage --> Consume["Bridge account consumes note on Miden testnet"]
+    Consume --> Settle["Release, refund, or mark final status"]</pre>
+    </div>
+
+    <div class="diagram">
+      <h3>Inbound: EVM deposit to Miden payout</h3>
+      <pre class="mermaid">sequenceDiagram
+    participant User
+    participant Anvil
+    participant Bridge
+    participant Miden
+    participant Recipient
+
+    User->>Bridge: Request quote eth-anvil:eth to miden-local:eth
+    Bridge-->>User: Return EVM deposit address
+    User->>Anvil: Send deposit tx
+    Bridge->>Anvil: Detect and confirm deposit
+    Bridge->>Bridge: Move quote to PROCESSING
+    Bridge->>Miden: Submit public P2ID mint tx
+    Miden-->>Bridge: Mint tx committed
+    Bridge->>Bridge: Persist Miden tx id and mark SUCCESS
+    Recipient->>Miden: Sync and discover public payout note</pre>
+    </div>
+
+    <div class="diagram">
+      <h3>Outbound: Miden public note to EVM release</h3>
+      <pre class="mermaid">sequenceDiagram
+    participant User
+    participant BridgeAPI
+    participant Miden
+    participant Poller
+    participant Anvil
+
+    User->>BridgeAPI: Request quote miden-local:eth to eth-anvil:eth
+    BridgeAPI-->>User: Return bridge account plus BridgeOutV1 memo
+    User->>Miden: Create public BridgeOutV1 note with assets
+    Poller->>Miden: Sync and scan public notes
+    Poller->>Poller: Validate quote hash, target account, faucet, amount
+    Poller->>Miden: Consume matched note
+    Miden-->>Poller: Consume tx committed
+    Poller->>Anvil: Release funds to EVM recipient
+    Poller->>BridgeAPI: Persist tx ids and mark SUCCESS</pre>
+    </div>
+
+    <div class="diagram">
+      <h3>Restart recovery</h3>
+      <pre class="mermaid">flowchart TD
+    A["Quote is PROCESSING"] --> B["Bridge container restarts"]
+    B --> C["Reload non-terminal quote from Postgres"]
+    C --> D{"Durable Miden tx id exists?"}
+    D -->|Yes| E["Wait for existing tx confirmation"]
+    D -->|No| F{"Only idempotency key exists?"}
+    F -->|Yes| G["Treat as interrupted before durable submit"]
+    F -->|No| H["Submit Miden tx"]
+    G --> H
+    H --> I["Persist Miden tx id"]
+    E --> J["Mark SUCCESS after confirmation"]
+    I --> J</pre>
+    </div>
 
     <h2>Evidence Summary</h2>
     <table class="evidence" summary="Evidence summary by bridge flow">
@@ -262,5 +356,9 @@ E2E_EVIDENCE outbound funding_correlation_id=787bb932-965a-4f07-bca0-40474caabf6
 E2E_EVIDENCE refund correlation_id=dd094af4-73f6-40c0-bb86-2eea34cc7d06 evm_deposit_tx_hashes=["0xb4beae8830c684109e22a9fc37d30ff2acad26806d412ec8275abaf2a81abdaf"] evm_refund_tx_hashes=["0xa435edec34875647ccecef0358a8a437a47173152fafcb9e07d3dd97cde802f4"]
 E2E_EVIDENCE restart_resume correlation_id=482ee24d-9c04-4a0a-8cf0-11fa270aaeec evm_deposit_tx_hashes=["0x5c831f42cf38944fef3c5ca0b926218d1277257af4db8bf72a7dd5ce10f6e656"] miden_mint_tx_ids=["0x276c72b9ff2919a4e8072fe08828cd28e96aa2b1e64ffcda5a6ba551a5e92898"]</pre>
   </div>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script type="text/javascript">
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+  </script>
 </body>
 </html>
