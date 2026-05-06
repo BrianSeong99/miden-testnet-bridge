@@ -30,6 +30,8 @@ use tracing::info;
 struct Config {
     database_url: String,
     miden_rpc_url: String,
+    miden_remote_prover_url: Option<String>,
+    miden_remote_prover_timeout_secs: u64,
     miden_store_dir: PathBuf,
     miden_master_seed_hex: String,
     evm_rpc_url: String,
@@ -60,7 +62,12 @@ impl Config {
                 "postgres://postgres:postgres@postgres:5432/miden_bridge".to_owned()
             }),
             miden_rpc_url: env::var("MIDEN_RPC_URL")
-                .unwrap_or_else(|_| "http://localhost:57291".to_owned()),
+                .unwrap_or_else(|_| "https://rpc.testnet.miden.io".to_owned()),
+            miden_remote_prover_url: optional_env("MIDEN_REMOTE_PROVER_URL"),
+            miden_remote_prover_timeout_secs: env::var("MIDEN_REMOTE_PROVER_TIMEOUT_SECS")
+                .unwrap_or_else(|_| "10".to_owned())
+                .parse()
+                .context("MIDEN_REMOTE_PROVER_TIMEOUT_SECS must be a valid u64")?,
             miden_store_dir: PathBuf::from(
                 env::var("MIDEN_STORE_DIR")
                     .unwrap_or_else(|_| "./.miden-store".to_owned()),
@@ -116,6 +123,10 @@ impl Config {
     }
 }
 
+fn optional_env(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.trim().is_empty())
+}
+
 fn parse_master_seed_hex(seed_hex: &str) -> Result<[u8; 32]> {
     let bytes = alloy::hex::decode(seed_hex).context("MIDEN_MASTER_SEED_HEX must be valid hex")?;
     bytes
@@ -141,9 +152,24 @@ async fn main() -> Result<()> {
 
     let store = arc_store(PostgresStateStore::new(pool));
     let miden_master_seed = parse_master_seed_hex(&config.miden_master_seed_hex)?;
-    let miden = Arc::new(MidenClient::new(&config.miden_rpc_url, &config.miden_store_dir).await?);
+    let miden = Arc::new(
+        MidenClient::new_with_remote_prover(
+            &config.miden_rpc_url,
+            &config.miden_store_dir,
+            config.miden_remote_prover_url.clone(),
+            Duration::from_secs(config.miden_remote_prover_timeout_secs),
+        )
+        .await?,
+    );
     bootstrap_miden(miden.as_ref(), store.clone(), &miden_master_seed).await?;
-    let pricer = Arc::new(CoinGeckoPricer::new());
+    // BRIDGE_PRICER=mock bypasses CoinGecko (rate-limited free tier hits 429
+    // under E2E load: 5 tests * 8 tokens * multiple polls). Set in compose
+    // for tests; production keeps the default CoinGecko path.
+    let pricer: miden_testnet_bridge::core::pricer::DynPricer =
+        match std::env::var("BRIDGE_PRICER").as_deref() {
+            Ok("mock") => Arc::new(miden_testnet_bridge::core::pricer::MockPricer),
+            _ => Arc::new(CoinGeckoPricer::new()),
+        };
     let evm = Arc::new(
         EvmClient::new(
             store.clone(),

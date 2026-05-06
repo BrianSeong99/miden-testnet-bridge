@@ -1,6 +1,8 @@
 use std::{
     io::{self, Write},
     path::Path,
+    process::Command,
+    sync::OnceLock,
     sync::{Arc, Mutex},
 };
 
@@ -87,6 +89,36 @@ impl TestDatabase {
     }
 }
 
+fn skip_docker_tests_reason() -> Option<String> {
+    static DOCKER_CHECK: OnceLock<Option<String>> = OnceLock::new();
+    DOCKER_CHECK
+        .get_or_init(|| match Command::new("docker").args(["info"]).output() {
+            Ok(output) if output.status.success() => None,
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let detail = stderr
+                    .lines()
+                    .chain(stdout.lines())
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("docker daemon unavailable");
+                Some(format!(
+                    "Docker-backed hardening tests require daemon access; {detail}"
+                ))
+            }
+            Err(error) => Some(format!(
+                "Docker-backed hardening tests require daemon access; failed to run docker info: {error}"
+            )),
+        })
+        .clone()
+}
+
+fn require_docker_tests(test_name: &str) {
+    if let Some(reason) = skip_docker_tests_reason() {
+        panic!("skip: {test_name}; {reason}");
+    }
+}
+
 #[derive(Clone, Default)]
 struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
 
@@ -127,6 +159,8 @@ fn captured_logs(buffer: &SharedBuffer) -> String {
 
 #[tokio::test(flavor = "current_thread")]
 async fn deadline_expiry_tick_refunds_past_due_quote_without_deposit() {
+    require_docker_tests("deadline_expiry_tick_refunds_past_due_quote_without_deposit");
+
     let db = TestDatabase::start().await;
     let pool = db.pool().await;
     let concrete_store = PostgresStateStore::new(pool.clone());
@@ -181,6 +215,8 @@ async fn deadline_expiry_tick_refunds_past_due_quote_without_deposit() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn stuck_processing_tick_logs_warn_and_leaves_state_unchanged() {
+    require_docker_tests("stuck_processing_tick_logs_warn_and_leaves_state_unchanged");
+
     let db = TestDatabase::start().await;
     let pool = db.pool().await;
     let store = PostgresStateStore::new(pool.clone());

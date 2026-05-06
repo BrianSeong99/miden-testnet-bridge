@@ -17,6 +17,8 @@ WORKDIR /app
 COPY --from=builder /app/target/release/miden-testnet-bridge /usr/local/bin/miden-testnet-bridge
 COPY migrations ./migrations
 
+RUN mkdir -p /var/lib/bridge/miden-store && chown -R bridge:bridge /var/lib/bridge
+
 ENV BRIDGE_HTTP_PORT=8080 \
     LOG_FORMAT=json \
     RUST_LOG=info,sqlx=warn,hyper=warn,tower_http=warn

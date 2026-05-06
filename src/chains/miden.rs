@@ -1,23 +1,20 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use miden_client::{
-    Client, DebugMode,
+    Client, DebugMode, RemoteTransactionProver,
     account::{AccountId, Address, AddressInterface},
     builder::ClientBuilder,
     keystore::FilesystemKeyStore,
     rpc::Endpoint,
 };
 use miden_client_sqlite_store::ClientBuilderSqliteExt;
-use tokio::{
-    runtime::Builder as RuntimeBuilder,
-    task,
-    time::{Duration, sleep},
-};
+use tokio::{runtime::Builder as RuntimeBuilder, task, time::sleep};
 use tracing::warn;
 
 type InnerClient = Client<FilesystemKeyStore>;
@@ -31,10 +28,21 @@ pub trait MidenHealthCheck: Send + Sync {
 pub struct MidenClient {
     endpoint: Endpoint,
     store_dir: PathBuf,
+    remote_prover_url: Option<String>,
+    remote_prover_timeout: Duration,
 }
 
 impl MidenClient {
     pub async fn new(endpoint: &str, store_dir: &Path) -> Result<Self> {
+        Self::new_with_remote_prover(endpoint, store_dir, None, Duration::from_secs(10)).await
+    }
+
+    pub async fn new_with_remote_prover(
+        endpoint: &str,
+        store_dir: &Path,
+        remote_prover_url: Option<String>,
+        remote_prover_timeout: Duration,
+    ) -> Result<Self> {
         std::fs::create_dir_all(store_dir)
             .with_context(|| format!("failed to create miden store dir {}", store_dir.display()))?;
 
@@ -44,6 +52,8 @@ impl MidenClient {
         Ok(Self {
             endpoint,
             store_dir: store_dir.to_path_buf(),
+            remote_prover_url,
+            remote_prover_timeout,
         })
     }
 
@@ -66,7 +76,13 @@ impl MidenClient {
     }
 
     pub async fn open(&self) -> Result<InnerClient> {
-        build_client(&self.endpoint, &self.store_dir).await
+        build_client(
+            &self.endpoint,
+            &self.store_dir,
+            self.remote_prover_url.as_deref(),
+            self.remote_prover_timeout,
+        )
+        .await
     }
 
     pub fn encode_basic_wallet_address(&self, account_id: AccountId) -> String {
@@ -80,6 +96,8 @@ impl MidenClient {
     pub async fn sync_state(&self) -> Result<()> {
         let endpoint = self.endpoint.clone();
         let store_dir = self.store_dir.clone();
+        let remote_prover_url = self.remote_prover_url.clone();
+        let remote_prover_timeout = self.remote_prover_timeout;
 
         task::spawn_blocking(move || {
             let runtime = RuntimeBuilder::new_current_thread()
@@ -88,7 +106,13 @@ impl MidenClient {
                 .context("failed to build tokio runtime for miden sync")?;
 
             runtime.block_on(async move {
-                let mut client = build_client(&endpoint, &store_dir).await?;
+                let mut client = build_client(
+                    &endpoint,
+                    &store_dir,
+                    remote_prover_url.as_deref(),
+                    remote_prover_timeout,
+                )
+                .await?;
 
                 for attempt in 0..5 {
                     match client.sync_state().await {
@@ -117,6 +141,8 @@ impl MidenClient {
     pub async fn tip_block_height(&self) -> Result<u32> {
         let endpoint = self.endpoint.clone();
         let store_dir = self.store_dir.clone();
+        let remote_prover_url = self.remote_prover_url.clone();
+        let remote_prover_timeout = self.remote_prover_timeout;
 
         task::spawn_blocking(move || {
             let runtime = RuntimeBuilder::new_current_thread()
@@ -125,7 +151,13 @@ impl MidenClient {
                 .context("failed to build tokio runtime for miden tip")?;
 
             runtime.block_on(async move {
-                let mut client = build_client(&endpoint, &store_dir).await?;
+                let mut client = build_client(
+                    &endpoint,
+                    &store_dir,
+                    remote_prover_url.as_deref(),
+                    remote_prover_timeout,
+                )
+                .await?;
 
                 for attempt in 0..5 {
                     match client.sync_state().await {
@@ -193,9 +225,12 @@ pub fn asset_symbol(asset_id: &str) -> Result<&'static str> {
     }
 }
 
+// Miden's BasicFungibleFaucet caps decimals at 12. ETH is 18-decimal on EVM,
+// so on the Miden side we represent it at 12 decimals; the bridge scales by
+// 10^6 when minting/consuming to keep amounts consistent across chains.
 pub fn asset_decimals(asset_id: &str) -> Result<u8> {
     match asset_id {
-        "miden-local:eth" | "eth-anvil:eth" => Ok(18),
+        "miden-local:eth" | "eth-anvil:eth" => Ok(12),
         "miden-local:usdc" | "eth-anvil:usdc" => Ok(6),
         "miden-local:usdt" | "eth-anvil:usdt" => Ok(6),
         "miden-local:btc" | "eth-anvil:btc" => Ok(8),
@@ -205,7 +240,8 @@ pub fn asset_decimals(asset_id: &str) -> Result<u8> {
 
 pub fn solver_liquidity_for_asset(asset_id: &str) -> Result<u64> {
     match asset_id {
-        "miden-local:eth" | "eth-anvil:eth" => Ok(10_000_000_000_000_000_000),
+        // 10 ETH at 12 Miden-side decimals = 10 * 10^12
+        "miden-local:eth" | "eth-anvil:eth" => Ok(10_000_000_000_000),
         "miden-local:usdc" | "eth-anvil:usdc" => Ok(1_000_000_000_000),
         "miden-local:usdt" | "eth-anvil:usdt" => Ok(1_000_000_000_000),
         "miden-local:btc" | "eth-anvil:btc" => Ok(10_000_000_000),
@@ -213,7 +249,12 @@ pub fn solver_liquidity_for_asset(asset_id: &str) -> Result<u64> {
     }
 }
 
-async fn build_client(endpoint: &Endpoint, store_dir: &Path) -> Result<InnerClient> {
+async fn build_client(
+    endpoint: &Endpoint,
+    store_dir: &Path,
+    remote_prover_url: Option<&str>,
+    remote_prover_timeout: Duration,
+) -> Result<InnerClient> {
     let store_path = store_dir.join("store.sqlite3");
     let keystore_path = store_dir.join("keystore");
     let keystore = FilesystemKeyStore::new(keystore_path.clone()).with_context(|| {
@@ -223,14 +264,33 @@ async fn build_client(endpoint: &Endpoint, store_dir: &Path) -> Result<InnerClie
         )
     })?;
 
-    ClientBuilder::new()
-        .grpc_client(endpoint, Some(10_000))
+    let mut builder = client_builder_for_endpoint(endpoint);
+    if let Some(remote_prover_url) = remote_prover_url {
+        builder = builder.prover(Arc::new(
+            RemoteTransactionProver::new(remote_prover_url.to_owned())
+                .with_timeout(remote_prover_timeout),
+        ));
+    }
+
+    builder
         .sqlite_store(store_path)
         .authenticator(Arc::new(keystore))
         .in_debug_mode(DebugMode::Disabled)
         .build()
         .await
         .context("failed to build miden client")
+}
+
+fn client_builder_for_endpoint(endpoint: &Endpoint) -> ClientBuilder<FilesystemKeyStore> {
+    if endpoint == &Endpoint::testnet() {
+        ClientBuilder::for_testnet()
+    } else if endpoint == &Endpoint::devnet() {
+        ClientBuilder::for_devnet()
+    } else if endpoint == &Endpoint::localhost() {
+        ClientBuilder::for_localhost()
+    } else {
+        ClientBuilder::new().grpc_client(endpoint, Some(10_000))
+    }
 }
 
 #[async_trait]

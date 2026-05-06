@@ -8,9 +8,9 @@ use crate::{
     AppState,
     api::errors::ApiError,
     chains::{
-        evm::evm_quote_requires_deposit_address, miden::asset_symbol,
-        miden::miden_quote_requires_deposit_address,
-        miden_deposit_account::derive_outbound_deposit_account,
+        evm::evm_quote_requires_deposit_address,
+        miden::{asset_symbol, miden_quote_requires_deposit_address, parse_account_id},
+        miden_bridge_note::BridgeOutDepositMemo,
     },
     now_iso8601,
     types::{DepositMode, Quote, QuoteRequest, QuoteResponse},
@@ -40,48 +40,6 @@ pub(crate) async fn quote(
 
     let correlation_id = Uuid::new_v4();
     let timestamp = now_iso8601();
-    let mut deposit_derivation_path = None;
-    let mut miden_deposit_artifact = None;
-    let deposit_address = if request.dry {
-        None
-    } else if evm_quote_requires_deposit_address(&request.origin_asset, &request.destination_asset)
-    {
-        if let Some(evm) = state.evm.as_ref() {
-            let (address, derivation_path) = evm
-                .derive_deposit_address(correlation_id)
-                .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
-            deposit_derivation_path = Some(derivation_path);
-            Some(address.to_string())
-        } else {
-            Some(format!("mock-{correlation_id}"))
-        }
-    } else if miden_quote_requires_deposit_address(&request.origin_asset) {
-        let Some(miden_client) = state.miden_client.as_ref() else {
-            return Err(ApiError::internal(
-                "Miden client is not configured for outbound deposit accounts".to_owned(),
-            ));
-        };
-        let Some(master_seed) = state.miden_master_seed.as_ref() else {
-            return Err(ApiError::internal(
-                "Miden master seed is not configured for outbound deposit accounts".to_owned(),
-            ));
-        };
-        let (account, _secret_key, init_seed, auth_seed) =
-            derive_outbound_deposit_account(master_seed, correlation_id)
-                .map_err(|error| ApiError::internal(error.to_string()))?;
-        miden_deposit_artifact = Some((
-            account.id().to_hex(),
-            format!(
-                "{}:{}",
-                alloy::hex::encode(init_seed),
-                alloy::hex::encode(auth_seed)
-            ),
-        ));
-        Some(miden_client.encode_basic_wallet_address(account.id()))
-    } else {
-        Some(format!("mock-{correlation_id}"))
-    };
 
     let origin_symbol = asset_symbol(&request.origin_asset)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -99,6 +57,66 @@ pub(crate) async fn quote(
             _ => ApiError::internal(error.to_string()),
         })?;
 
+    let mut deposit_derivation_path = None;
+    let mut deposit_memo = None;
+    let deposit_address = if request.dry {
+        None
+    } else if evm_quote_requires_deposit_address(&request.origin_asset, &request.destination_asset)
+    {
+        if let Some(evm) = state.evm.as_ref() {
+            let (address, derivation_path) = evm
+                .derive_deposit_address(correlation_id)
+                .await
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+            deposit_derivation_path = Some(derivation_path);
+            Some(address.to_string())
+        } else {
+            Some(format!("mock-{correlation_id}"))
+        }
+    } else if miden_quote_requires_deposit_address(&request.origin_asset) {
+        let Some(bootstrap) = state
+            .store
+            .get_miden_bootstrap()
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?
+        else {
+            return Err(ApiError::internal(
+                "Miden bootstrap state is missing for bridge-note quote".to_owned(),
+            ));
+        };
+        let bridge_account_id = bootstrap.solver_account_id;
+        let memo = BridgeOutDepositMemo::from_quote(
+            &request,
+            correlation_id,
+            &price_quote.output_amount,
+            &bridge_account_id,
+        )
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+        tracing::info!(
+            %correlation_id,
+            origin_asset = %request.origin_asset,
+            destination_asset = %request.destination_asset,
+            bridge_account_id = %memo.bridge_account_id,
+            quote_hash = %memo.storage.quote_hash,
+            storage_encoding = %memo.storage_encoding,
+            storage_items = memo.storage.storage_items.len(),
+            "created Miden BridgeOutV1 quote instruction"
+        );
+        deposit_memo = Some(
+            memo.to_deposit_memo()
+                .map_err(|error| ApiError::internal(error.to_string()))?,
+        );
+        if let Some(miden_client) = state.miden_client.as_ref() {
+            let account_id = parse_account_id(&bridge_account_id)
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+            Some(miden_client.encode_basic_wallet_address(account_id))
+        } else {
+            Some(bridge_account_id)
+        }
+    } else {
+        Some(format!("mock-{correlation_id}"))
+    };
+
     let response = QuoteResponse {
         correlation_id: correlation_id.to_string(),
         timestamp,
@@ -107,7 +125,7 @@ pub(crate) async fn quote(
         quote_request: request.clone(),
         quote: Quote {
             deposit_address: deposit_address.clone(),
-            deposit_memo: None,
+            deposit_memo: deposit_memo.clone(),
             amount_in: request.amount.clone(),
             amount_in_formatted: request.amount.clone(),
             amount_in_usd: price_quote.input_usd,
@@ -138,13 +156,6 @@ pub(crate) async fn quote(
                 .await
                 .map_err(|error| ApiError::internal(error.to_string()))?;
         }
-        if let Some((account_id, seed_hex)) = miden_deposit_artifact {
-            state
-                .store
-                .set_miden_deposit_account(correlation_id, &account_id, &seed_hex)
-                .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
-        }
     }
 
     Ok(Json(response))
@@ -156,10 +167,17 @@ mod tests {
         body::{Body, to_bytes},
         http::{Request, StatusCode},
     };
+    use miden_client::account::{AccountStorageMode, AccountType};
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use crate::{AppState, app, test_support::memory_state, types::QuoteResponse};
+    use crate::{
+        AppState, app,
+        chains::miden_bridge_note::BridgeOutDepositMemo,
+        core::state::MidenBootstrapRecord,
+        test_support::{memory_state, test_miden_account_id},
+        types::QuoteResponse,
+    };
 
     fn sample_quote_request() -> Value {
         json!({
@@ -177,6 +195,43 @@ mod tests {
             "recipientType": "DESTINATION_CHAIN",
             "deadline": "2026-06-12T00:00:00Z"
         })
+    }
+
+    fn miden_origin_quote_request() -> Value {
+        json!({
+            "dry": false,
+            "depositMode": "SIMPLE",
+            "swapType": "EXACT_INPUT",
+            "slippageTolerance": 100.0,
+            "originAsset": "miden-local:eth",
+            "depositType": "ORIGIN_CHAIN",
+            "destinationAsset": "eth-anvil:eth",
+            "amount": "1000",
+            "refundTo": "0xrefund",
+            "refundType": "ORIGIN_CHAIN",
+            "recipient": "0xrecipient",
+            "recipientType": "DESTINATION_CHAIN",
+            "deadline": "2026-06-12T00:00:00Z"
+        })
+    }
+
+    async fn seed_miden_bootstrap(store: &crate::core::state::DynStateStore) {
+        let solver_account_id = test_miden_account_id(
+            AccountType::RegularAccountUpdatableCode,
+            AccountStorageMode::Private,
+            0xccdd_eeff,
+        )
+        .to_hex();
+        store
+            .upsert_miden_bootstrap(&MidenBootstrapRecord {
+                solver_account_id,
+                eth_faucet_account_id: "0xeth".to_owned(),
+                usdc_faucet_account_id: "0xusdc".to_owned(),
+                usdt_faucet_account_id: "0xusdt".to_owned(),
+                btc_faucet_account_id: "0xbtc".to_owned(),
+            })
+            .await
+            .expect("seed miden bootstrap");
     }
 
     fn with_override(mut value: Value, key: &str, replacement: Value) -> Value {
@@ -294,6 +349,71 @@ mod tests {
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn miden_origin_quote_returns_public_bridge_note_instruction() {
+        let store = memory_state();
+        seed_miden_bootstrap(&store).await;
+        let app = app(AppState::new(store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post("/v0/quote")
+                    .header("content-type", "application/json")
+                    .body(Body::from(miden_origin_quote_request().to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let quote: QuoteResponse = serde_json::from_slice(&body).expect("quote response");
+        let bootstrap = store
+            .get_miden_bootstrap()
+            .await
+            .expect("bootstrap")
+            .expect("bootstrap row");
+        let deposit_address = quote
+            .quote
+            .deposit_address
+            .as_deref()
+            .expect("deposit address");
+        let deposit_memo = quote.quote.deposit_memo.as_deref().expect("deposit memo");
+        let memo: BridgeOutDepositMemo =
+            serde_json::from_str(deposit_memo).expect("bridge note memo");
+
+        assert_eq!(deposit_address, bootstrap.solver_account_id);
+        assert_eq!(memo.version, "bridge-out-v1");
+        assert_eq!(memo.note_type, "PUBLIC");
+        assert_eq!(memo.bridge_account_id, bootstrap.solver_account_id);
+        assert_eq!(memo.storage.correlation_id, quote.correlation_id);
+        assert_eq!(memo.storage.origin_asset, "miden-local:eth");
+        assert_eq!(memo.storage.destination_asset, "eth-anvil:eth");
+        assert_eq!(memo.storage.amount_in, "1000");
+        assert_eq!(memo.storage.min_amount_out, "1000");
+        assert_eq!(memo.storage.destination_recipient, "0xrecipient");
+        assert_eq!(memo.storage.refund_account, "0xrefund");
+
+        let stored = store
+            .get_quote_by_deposit(deposit_address, Some(deposit_memo))
+            .await
+            .expect("state query")
+            .expect("stored quote");
+        assert_eq!(stored.miden_deposit_account_id, None);
+        assert_eq!(stored.miden_deposit_seed_hex, None);
+
+        let tracked = store
+            .list_miden_tracked_quotes()
+            .await
+            .expect("tracked quotes");
+        assert_eq!(tracked.len(), 1);
+        assert_eq!(tracked[0].deposit_memo.as_deref(), Some(deposit_memo));
+        assert_eq!(tracked[0].miden_deposit_account_id, None);
     }
 
     #[tokio::test]

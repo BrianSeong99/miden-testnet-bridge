@@ -74,13 +74,14 @@ pub struct EvmTrackedQuote {
 pub struct MidenTrackedQuote {
     pub correlation_id: Uuid,
     pub deposit_address: String,
+    pub deposit_memo: Option<String>,
     pub origin_asset: String,
     pub destination_asset: String,
     pub recipient: String,
     pub amount_in: String,
     pub status: String,
-    pub miden_deposit_account_id: String,
-    pub miden_deposit_seed_hex: String,
+    pub miden_deposit_account_id: Option<String>,
+    pub miden_deposit_seed_hex: Option<String>,
     pub evm_release_tx_hashes: Vec<String>,
     pub miden_consume_tx_ids: Vec<String>,
 }
@@ -580,6 +581,7 @@ impl StateStore for PostgresStateStore {
             SELECT
                 q.correlation_id,
                 q.deposit_address,
+                q.deposit_memo,
                 q.quote_request_json,
                 q.quote_response_json,
                 q.status,
@@ -590,8 +592,14 @@ impl StateStore for PostgresStateStore {
             FROM quotes q
             INNER JOIN chain_artifacts c ON c.correlation_id = q.correlation_id
             WHERE q.status IN ('PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING')
-              AND c.miden_deposit_account_id IS NOT NULL
-              AND c.miden_deposit_seed_hex IS NOT NULL
+              AND q.quote_request_json->>'originAsset' LIKE 'miden-local:%'
+              AND (
+                  q.deposit_memo IS NOT NULL
+                  OR (
+                      c.miden_deposit_account_id IS NOT NULL
+                      AND c.miden_deposit_seed_hex IS NOT NULL
+                  )
+              )
             ORDER BY q.created_at ASC
             "#,
         )
@@ -607,6 +615,7 @@ impl StateStore for PostgresStateStore {
                 Ok(MidenTrackedQuote {
                     correlation_id: row.try_get("correlation_id")?,
                     deposit_address: row.try_get("deposit_address")?,
+                    deposit_memo: row.try_get("deposit_memo")?,
                     origin_asset: request.origin_asset,
                     destination_asset: request.destination_asset,
                     recipient: request.recipient,

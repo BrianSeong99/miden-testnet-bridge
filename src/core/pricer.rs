@@ -63,12 +63,25 @@ struct CoinGeckoPrice {
 pub struct MockPricer;
 
 impl CoinGeckoPricer {
-    const DEFAULT_BASE_URL: &'static str = "https://api.coingecko.com/api/v3";
+    // Trailing slash matters: `Url::join("simple/price")` against a base
+    // without trailing `/` strips the last segment ("v3"), producing the wrong
+    // URL `/api/simple/price` and a 403 from CoinGecko.
+    const DEFAULT_BASE_URL: &'static str = "https://api.coingecko.com/api/v3/";
     const DEFAULT_TTL: Duration = Duration::from_secs(15);
 
     pub fn new() -> Self {
+        // CoinGecko's free endpoint 403s on requests without a User-Agent.
+        // reqwest::Client::new() doesn't set one by default.
+        let client = reqwest::Client::builder()
+            .user_agent(concat!(
+                env!("CARGO_PKG_NAME"),
+                "/",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .build()
+            .expect("reqwest client should build");
         Self::with_client_and_config(
-            reqwest::Client::new(),
+            client,
             Url::parse(Self::DEFAULT_BASE_URL).expect("valid CoinGecko base URL"),
             Self::DEFAULT_TTL,
         )
@@ -243,6 +256,7 @@ fn decimal_to_string(value: Decimal) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{net::TcpListener, sync::OnceLock};
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
         matchers::{method, path, query_param},
@@ -256,8 +270,26 @@ mod tests {
         )
     }
 
+    fn skip_local_socket_tests_reason() -> Option<&'static str> {
+        static SOCKET_CHECK: OnceLock<Option<&'static str>> = OnceLock::new();
+        SOCKET_CHECK
+            .get_or_init(|| match TcpListener::bind(("127.0.0.1", 0)) {
+                Ok(_) => None,
+                Err(error) => Some(Box::leak(
+                    format!("skipping wiremock test; local socket bind unavailable: {error}")
+                        .into_boxed_str(),
+                )),
+            })
+            .as_deref()
+    }
+
     #[tokio::test]
     async fn caches_prices_within_ttl() {
+        if let Some(reason) = skip_local_socket_tests_reason() {
+            eprintln!("{reason}");
+            return;
+        }
+
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/simple/price"))
@@ -288,6 +320,11 @@ mod tests {
 
     #[tokio::test]
     async fn refreshes_cache_after_ttl_expires() {
+        if let Some(reason) = skip_local_socket_tests_reason() {
+            eprintln!("{reason}");
+            return;
+        }
+
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/simple/price"))
@@ -323,6 +360,11 @@ mod tests {
 
     #[tokio::test]
     async fn returns_error_for_failed_http_response() {
+        if let Some(reason) = skip_local_socket_tests_reason() {
+            eprintln!("{reason}");
+            return;
+        }
+
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/simple/price"))
@@ -341,6 +383,11 @@ mod tests {
 
     #[tokio::test]
     async fn returns_error_for_missing_price_payload() {
+        if let Some(reason) = skip_local_socket_tests_reason() {
+            eprintln!("{reason}");
+            return;
+        }
+
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/simple/price"))
