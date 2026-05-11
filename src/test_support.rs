@@ -10,16 +10,21 @@ use uuid::Uuid;
 use crate::{
     chains::miden::is_miden_asset_id,
     core::state::{
-        DeadlineScanQuote, DynStateStore, EvmTrackedQuote, MidenBootstrapRecord, MidenTrackedQuote,
-        QuoteRecord, StateStore, StateStoreError, StuckProcessingQuote, TxHashColumn,
+        DeadlineScanQuote, DynStateStore, EvmTrackedQuote, LifecycleEventRecord,
+        MidenBootstrapRecord, MidenTrackedQuote, QuoteRecord, StateStore, StateStoreError,
+        StuckProcessingQuote, TxHashColumn,
     },
     types::{QuoteRequest, QuoteResponse},
 };
 
 #[derive(Clone)]
 struct MemoryLifecycleEvent {
+    id: i64,
     correlation_id: Uuid,
+    from_status: Option<String>,
+    to_status: String,
     event_kind: String,
+    reason: Option<String>,
     metadata: Option<Value>,
     created_at: OffsetDateTime,
 }
@@ -29,6 +34,7 @@ struct MemoryStoreState {
     quotes: HashMap<(String, Option<String>), QuoteRecord>,
     miden_bootstrap: Option<MidenBootstrapRecord>,
     lifecycle_events: Vec<MemoryLifecycleEvent>,
+    next_event_id: i64,
 }
 
 #[derive(Clone)]
@@ -144,13 +150,44 @@ impl StateStore for MemoryStateStore {
             .cloned())
     }
 
+    async fn list_recent_quotes(&self, limit: i64) -> Result<Vec<QuoteRecord>, StateStoreError> {
+        let mut quotes: Vec<_> = self.state.lock().await.quotes.values().cloned().collect();
+        quotes.sort_by_key(|quote| std::cmp::Reverse(quote.updated_at));
+        quotes.truncate(limit.max(0) as usize);
+        Ok(quotes)
+    }
+
+    async fn list_lifecycle_events(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Vec<LifecycleEventRecord>, StateStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .lifecycle_events
+            .iter()
+            .filter(|event| event.correlation_id == correlation_id)
+            .map(|event| LifecycleEventRecord {
+                id: event.id,
+                correlation_id: event.correlation_id,
+                from_status: event.from_status.clone(),
+                to_status: event.to_status.clone(),
+                event_kind: event.event_kind.clone(),
+                reason: event.reason.clone(),
+                metadata: event.metadata.clone(),
+                created_at: event.created_at,
+            })
+            .collect())
+    }
+
     async fn record_event(
         &self,
         correlation_id: Uuid,
-        _from_status: Option<&str>,
+        from_status: Option<&str>,
         to_status: &str,
         event_kind: &str,
-        _reason: Option<&str>,
+        reason: Option<&str>,
         metadata: Option<Value>,
     ) -> Result<(), StateStoreError> {
         let mut state = self.state.lock().await;
@@ -160,9 +197,15 @@ impl StateStore for MemoryStateStore {
                 quote.updated_at = OffsetDateTime::now_utc();
             }
         }
+        let id = state.next_event_id;
+        state.next_event_id += 1;
         state.lifecycle_events.push(MemoryLifecycleEvent {
+            id,
             correlation_id,
+            from_status: from_status.map(ToOwned::to_owned),
+            to_status: to_status.to_owned(),
             event_kind: event_kind.to_owned(),
+            reason: reason.map(ToOwned::to_owned),
             metadata,
             created_at: OffsetDateTime::now_utc(),
         });

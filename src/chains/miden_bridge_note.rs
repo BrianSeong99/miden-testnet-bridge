@@ -275,7 +275,7 @@ mod tests {
             deposit_mode: None,
             swap_type: SwapType::ExactInput,
             slippage_tolerance: 100.0,
-            origin_asset: "miden-local:eth".to_owned(),
+            origin_asset: "miden-testnet:eth".to_owned(),
             deposit_type: DepositType::OriginChain,
             destination_asset: "eth-anvil:eth".to_owned(),
             amount: "1000".to_owned(),

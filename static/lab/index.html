@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Miden Bridge 1Click Mock Lab</title>
+    <link rel="stylesheet" href="/lab/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">NEAR Intents 1Click mock</p>
+          <h1>Miden testnet bridge sandbox</h1>
+          <p class="lede">
+            Builder-facing mock API for testing 1Click quote, deposit, status,
+            and settlement flows across Anvil and Miden testnet.
+          </p>
+        </div>
+        <aside class="runtime-panel">
+          <div class="runtime-line">
+            <span>API</span>
+            <strong id="api-health">checking</strong>
+          </div>
+          <div class="runtime-line">
+            <span>Profile</span>
+            <strong id="runtime-profile">unknown</strong>
+          </div>
+          <div class="runtime-line">
+            <span>Demo tools</span>
+            <strong id="demo-state">unknown</strong>
+          </div>
+        </aside>
+      </header>
+
+      <section class="api-strip" aria-label="1Click API flow">
+        <span>GET /v0/tokens</span>
+        <span>POST /v0/quote</span>
+        <span>Origin deposit</span>
+        <span>POST /v0/deposit/submit</span>
+        <span>GET /v0/status</span>
+      </section>
+
+      <section class="diagram-panel" aria-label="Flow diagrams">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Solution diagrams</p>
+            <h2>Mock 1Click flow</h2>
+          </div>
+        </div>
+        <div class="diagram-grid">
+          <article class="diagram-card">
+            <h3>Solution overview</h3>
+            <pre class="mermaid">flowchart LR
+    App["Builder app"] --> API["Mock NEAR Intents 1Click API"]
+    API --> V0["/v0/tokens /quote /deposit/submit /status"]
+    API --> Anvil["Anvil EVM"]
+    API --> Miden["Miden public testnet"]
+    Miden --> Notes["Public programmable notes"]
+    Demo["/demo/* + /lab"] -. sandbox helpers .-> API</pre>
+          </article>
+          <article class="diagram-card">
+            <h3>Inbound: Anvil to Miden</h3>
+            <pre class="mermaid">sequenceDiagram
+    participant User
+    participant Anvil
+    participant BridgeAPI as Bridge API
+    participant Miden
+    participant Recipient
+    User->>BridgeAPI: POST /v0/quote eth-anvil:eth -> miden-testnet:eth
+    BridgeAPI-->>User: EVM depositAddress
+    User->>Anvil: Send deposit
+    BridgeAPI->>Anvil: Detect and confirm deposit
+    BridgeAPI->>Miden: Solver account submits public P2ID mint to recipient
+    Miden-->>BridgeAPI: P2ID note committed and consumable
+    BridgeAPI-->>User: GET /v0/status = SUCCESS
+    Recipient->>Miden: Claim public P2ID note
+    Miden-->>Recipient: Wallet balance updated</pre>
+          </article>
+          <article class="diagram-card">
+            <h3>Outbound: Miden to Anvil</h3>
+            <pre class="mermaid">sequenceDiagram
+    participant UserClient
+    participant BridgeAPI as Bridge API
+    participant Miden
+    participant Anvil
+    UserClient->>BridgeAPI: POST /v0/quote miden-testnet:eth -> eth-anvil:eth
+    BridgeAPI-->>UserClient: Stable bridge account + BridgeOutV1 memo
+    UserClient->>Miden: Create public BridgeOutV1 note
+    BridgeAPI->>Miden: Sync and validate public note
+    BridgeAPI->>Miden: Consume note with bridge account
+    BridgeAPI->>Anvil: Release ETH to recipient
+    BridgeAPI-->>UserClient: GET /v0/status = SUCCESS</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="actions-grid">
+        <article class="action-slab">
+          <div>
+            <p class="eyebrow">Anvil to Miden</p>
+            <h2>Inbound P2ID mint</h2>
+            <p>
+              Requests a 1Click-shaped quote, sends native ETH on Anvil, waits
+              for the bridge to mint a solver-signed public P2ID note on Miden,
+              then lets the recipient claim it.
+            </p>
+          </div>
+          <div class="control-row">
+            <label>
+              Amount
+              <input id="inbound-amount" value="1000000000000" />
+            </label>
+            <button id="start-inbound">Start inbound</button>
+            <button id="claim-inbound" class="secondary" disabled>Claim note</button>
+          </div>
+        </article>
+
+        <article class="action-slab">
+          <div>
+            <p class="eyebrow">Miden to Anvil</p>
+            <h2>Public BridgeOutV1 note</h2>
+            <p>
+              Funds a Miden wallet through the inbound route, then submits a
+              public programmable bridge note. The bridge consumes the note and
+              releases native ETH on Anvil.
+            </p>
+          </div>
+          <div class="control-row">
+            <label>
+              Amount
+              <input id="outbound-amount" value="1000000000000" />
+            </label>
+            <button id="fund-outbound">Fund Miden wallet</button>
+            <button id="submit-outbound" class="secondary" disabled>Submit public note</button>
+          </div>
+        </article>
+      </section>
+
+      <section id="error-panel" class="error-panel" hidden></section>
+
+      <section class="workspace">
+        <div>
+          <div class="section-title">
+            <p class="eyebrow">Live flows</p>
+            <button id="refresh-flows" class="ghost">Refresh</button>
+          </div>
+          <div id="flow-list" class="flow-list"></div>
+        </div>
+
+        <aside class="artifact-panel">
+          <p class="eyebrow">Selected artifacts</p>
+          <pre id="artifact-json">{}</pre>
+        </aside>
+      </section>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+      if (window.mermaid) {
+        mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+      }
+    </script>
+    <script src="/lab/app.js"></script>
+  </body>
+</html>
