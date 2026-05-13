@@ -77,6 +77,7 @@ async fn quote(client: &reqwest::Client, base_url: &str, args: &[String]) -> Res
     let direction = args.first().map(String::as_str).unwrap_or("inbound");
     let asset = flag(args, "--asset").unwrap_or("eth");
     let amount = flag(args, "--amount").unwrap_or("1000000000000");
+    let evm_prefix = evm_asset_prefix(client, base_url).await?;
     let recipient = flag(args, "--recipient").unwrap_or(match direction {
         "outbound" => "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
         _ => "miden-recipient-address",
@@ -87,12 +88,12 @@ async fn quote(client: &reqwest::Client, base_url: &str, args: &[String]) -> Res
     });
     let (origin_asset, destination_asset) = match direction {
         "inbound" => (
-            format!("eth-anvil:{asset}"),
+            format!("{evm_prefix}:{asset}"),
             format!("miden-testnet:{asset}"),
         ),
         "outbound" => (
             format!("miden-testnet:{asset}"),
-            format!("eth-anvil:{asset}"),
+            format!("{evm_prefix}:{asset}"),
         ),
         other => bail!("direction must be inbound or outbound, got {other}"),
     };
@@ -112,6 +113,33 @@ async fn quote(client: &reqwest::Client, base_url: &str, args: &[String]) -> Res
         "deadline": "2027-01-01T00:00:00Z"
     });
     post_json(client, &format!("{base_url}/v0/quote"), payload).await
+}
+
+async fn evm_asset_prefix(client: &reqwest::Client, base_url: &str) -> Result<String> {
+    let response = client
+        .get(format!("{base_url}/demo/info"))
+        .send()
+        .await
+        .context("demo info request failed")?;
+    if response.status().is_success() {
+        let value = response.json::<Value>().await?;
+        if let Some(profile) = value.get("runtimeProfile").and_then(Value::as_str) {
+            return profile_to_evm_asset_prefix(profile);
+        }
+    }
+
+    match env::var("BRIDGE_PROFILE") {
+        Ok(profile) => profile_to_evm_asset_prefix(&profile),
+        Err(_) => Ok("eth-anvil".to_owned()),
+    }
+}
+
+fn profile_to_evm_asset_prefix(profile: &str) -> Result<String> {
+    match profile {
+        "anvil" => Ok("eth-anvil".to_owned()),
+        "sepolia" => Ok("eth-sepolia".to_owned()),
+        other => bail!("unsupported BRIDGE_PROFILE {other}"),
+    }
 }
 
 async fn demo(client: &reqwest::Client, base_url: &str, args: &[String]) -> Result<()> {

@@ -61,8 +61,10 @@ integrations should use the `/v0/*` API.
 - Evidence logging: E2E runs print correlation ids, Miden tx ids, EVM tx hashes,
   and lifecycle evidence.
 
-This does not prove Sepolia yet. Sepolia requires live RPC configuration, funded
-solver liquidity, token registry wiring, and public EVM explorer evidence.
+This does not prove Sepolia yet. The Sepolia profile is wired for native ETH
+quotes and tx-hash based deposit confirmation, but live validation still
+requires a Sepolia RPC URL, funded solver key, funded test user, and explorer
+evidence for both directions.
 
 ## Bridge Shape
 
@@ -188,6 +190,34 @@ API, `/lab`, and `bridgectl` entry points.
 ```
 
 Set `BRIDGE_URL=http://host:port` to point the CLI at a non-default bridge.
+`bridgectl quote` infers the EVM asset prefix from `/demo/info`, so it uses
+`eth-anvil:*` in Anvil mode and `eth-sepolia:*` in Sepolia mode.
+
+## Sepolia-Ready Profile
+
+Sepolia mode keeps the same NEAR Intents 1Click-shaped surface, but it does not
+scan Sepolia from genesis. The builder submits the real EVM tx hash after the
+deposit lands, and the bridge verifies that transaction before settlement:
+
+```bash
+cp .env.sepolia.example .env
+# Fill EVM_RPC_URL, MASTER_MNEMONIC, SOLVER_PRIVATE_KEY, and MIDEN_MASTER_SEED_HEX.
+make sepolia
+./bin/bridgectl tokens
+./bin/bridgectl quote inbound --asset eth --amount 1000000000000 --recipient <miden-address> --refund-to <sepolia-address>
+```
+
+After sending Sepolia ETH to the returned `depositAddress`, notify the mock:
+
+```bash
+curl -s http://localhost:8080/v0/deposit/submit \
+  -H 'content-type: application/json' \
+  -d '{"txHash":"0x...","depositAddress":"0x..."}'
+```
+
+Native ETH is enabled by default as `eth-sepolia:eth`. ERC20 Sepolia assets are
+advertised only when `EVM_TOKEN_ADDRESSES_PATH` points at a JSON file with token
+addresses for `usdc`, `usdt`, or `btc`.
 
 ## Clickable Lab
 
@@ -239,7 +269,7 @@ grep -E 'E2E_EVIDENCE|test result:' e2e.log
 The recorded evidence run for this pivot produced:
 
 ```text
-test result: ok. 5 passed; 0 failed; finished in 822.50s
+test result: ok. 5 passed; 0 failed; finished in 934.77s
 ```
 
 The current static evidence report is checked in at
@@ -319,16 +349,18 @@ flowchart TD
 | `DATABASE_URL` | Yes | `postgres://postgres:postgres@postgres:5432/miden_bridge` | Postgres DSN used by the bridge service. |
 | `MIDEN_RPC_URL` | Yes | `https://rpc.testnet.miden.io` | Public Miden testnet RPC endpoint. Set to `http://miden-node:57291` only for legacy local-node mode. |
 | `MIDEN_REMOTE_PROVER_URL` | No | Native `miden-client` testnet/devnet default | Optional remote transaction prover override. Public testnet works without setting this. |
-| `MIDEN_REMOTE_PROVER_TIMEOUT_SECS` | No | `60` | Timeout for remote transaction prover requests. Public testnet proving can exceed 10 seconds during bootstrap. |
+| `MIDEN_REMOTE_PROVER_TIMEOUT_SECS` | No | `180` | Timeout for remote transaction prover requests. Public testnet proving can exceed the SDK's default 10 seconds during bootstrap. |
 | `MIDEN_MASTER_SEED_HEX` | Yes for reproducible public testnet runs | Compose fallback is a fixed test seed | 32-byte hex seed used to derive the deterministic Miden solver and faucet accounts. Use a fresh value for each public testnet run. |
 | `MIDEN_STORE_DIR` | Yes | `/var/lib/bridge/miden-store` in Compose, `./.miden-store` for host runs | Persistent SQLite store plus keystore for the Rust Miden client. |
-| `EVM_RPC_URL` | Yes | `http://anvil:8545` in Compose | EVM RPC endpoint. The validated E2E path uses local Anvil. |
+| `EVM_RPC_URL` | Yes | `http://anvil:8545` in Compose | EVM RPC endpoint. The validated E2E path uses local Anvil; Sepolia mode expects a Sepolia RPC URL. |
 | `MASTER_MNEMONIC` | Yes | Anvil default mnemonic in Compose | Seed material for deterministic EVM quote wallet derivation. |
 | `SOLVER_PRIVATE_KEY` | Yes | Anvil default account key in Compose | Solver-side EVM key used for local Anvil release and refund transactions. |
 | `EVM_CHAIN_ID` | No | `271828` | Local Anvil chain id. |
 | `EVM_TOKEN_ADDRESSES_PATH` | No | `/state/token-addresses.json` | Address file produced by `anvil-init`. |
+| `EVM_REQUIRED_CONFIRMATIONS` | No | `1` for Anvil, `2` in `.env.sepolia.example` | Number of EVM confirmations required before deposit confirmation or solver release/refund completion. |
+| `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS` | No | Empty | Optional bounded scan window. Leave empty for Sepolia so deposits are confirmed through `/v0/deposit/submit` tx hashes instead of RPC-heavy history scans. |
 | `BRIDGE_HTTP_PORT` | No | `8080` | Host port exposed by the bridge service. |
-| `BRIDGE_PROFILE` | No | `anvil` | Runtime profile. `anvil` is the supported builder sandbox; `sepolia` is reserved for the next milestone. |
+| `BRIDGE_PROFILE` | No | `anvil` | Runtime profile. `anvil` is the validated builder sandbox; `sepolia` enables `eth-sepolia:*` assets and tx-hash based deposit confirmation. |
 | `BRIDGE_DEMO_ENABLED` | No | `0` | Enables `/demo/*` orchestration endpoints. Set to `1` for the clickable sandbox. |
 | `BRIDGE_UI_ENABLED` | No | `1` | Documents whether `/lab` should be treated as enabled by clients. |
 | `BRIDGE_CORS_ALLOW_ORIGIN` | No | `*` | CORS allow-origin for third-party app builders testing from a browser. |

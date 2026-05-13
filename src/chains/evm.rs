@@ -24,12 +24,16 @@ use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::interval;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    chains::{miden::MidenClient, miden_bootstrap::bootstrap_state_from_record},
+    chains::{
+        miden::MidenClient,
+        miden_bootstrap::bootstrap_state_from_record,
+        profile::{BridgeProfile, is_evm_native_asset},
+    },
     core::{
         lifecycle::{DynLifecycle, LifecycleEvent},
         state::{DynStateStore, EvmTrackedQuote, TxHashColumn},
@@ -49,6 +53,9 @@ pub struct EvmConfig {
     pub solver_private_key: String,
     pub token_addresses_path: PathBuf,
     pub chain_id: u64,
+    pub profile: BridgeProfile,
+    pub required_confirmations: u64,
+    pub deposit_scan_lookback_blocks: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -59,6 +66,9 @@ pub struct EvmClient {
     master_mnemonic: String,
     token_contracts: TokenContracts,
     miden_client: Option<Arc<MidenClient>>,
+    profile: BridgeProfile,
+    required_confirmations: u64,
+    deposit_scan_lookback_blocks: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,8 +113,11 @@ impl EvmClient {
             signer_provider,
             store,
             master_mnemonic: config.master_mnemonic,
-            token_contracts: TokenContracts::load(&config.token_addresses_path)?,
+            token_contracts: TokenContracts::load(&config.token_addresses_path, config.profile)?,
             miden_client: None,
+            profile: config.profile,
+            required_confirmations: config.required_confirmations,
+            deposit_scan_lookback_blocks: config.deposit_scan_lookback_blocks,
         })
     }
 
@@ -245,6 +258,29 @@ impl EvmClient {
         self.token_contracts.by_asset_id.get(asset_id).copied()
     }
 
+    pub fn profile(&self) -> BridgeProfile {
+        self.profile
+    }
+
+    pub fn asset_for_asset_id(&self, asset_id: &str) -> Result<EvmAsset> {
+        if !self.profile.is_evm_asset_id(asset_id) {
+            return Err(anyhow!(
+                "asset {asset_id} is not supported in {} profile",
+                self.profile.as_str()
+            ));
+        }
+        if is_evm_native_asset(asset_id) {
+            return Ok(EvmAsset::NativeEth);
+        }
+        if crate::chains::profile::quote_origin_asset_is_supported(asset_id) {
+            return self
+                .token_address(asset_id)
+                .map(EvmAsset::Erc20)
+                .ok_or_else(|| anyhow!("missing token address for {asset_id}"));
+        }
+        Err(anyhow!("unsupported EVM asset {asset_id}"))
+    }
+
     pub async fn miden_faucet_account_id(
         &self,
         asset_id: &str,
@@ -314,7 +350,7 @@ impl EvmClient {
             .context("failed to list EVM tracked quotes")?;
 
         for quote in tracked_quotes {
-            if !quote.origin_asset.starts_with("eth-anvil:") {
+            if !self.profile.is_evm_asset_id(&quote.origin_asset) {
                 continue;
             }
 
@@ -351,7 +387,7 @@ impl EvmClient {
         let deposit_address = Address::from_str(&quote.deposit_address)
             .with_context(|| format!("invalid deposit address {}", quote.deposit_address))?;
 
-        if quote.origin_asset == "eth-anvil:eth" {
+        if is_evm_native_asset(&quote.origin_asset) {
             let balance = self
                 .provider
                 .get_balance(deposit_address)
@@ -360,8 +396,17 @@ impl EvmClient {
             if balance.is_zero() {
                 return Ok(None);
             }
+            let Some(from_block) = self.deposit_scan_start(latest_block) else {
+                debug!(
+                    correlation_id = %quote.correlation_id,
+                    deposit_address = %quote.deposit_address,
+                    profile = self.profile.as_str(),
+                    "waiting for submitted EVM deposit tx hash"
+                );
+                return Ok(None);
+            };
             return self
-                .find_native_transfer(deposit_address, latest_block)
+                .find_native_transfer(deposit_address, from_block, latest_block)
                 .await;
         }
 
@@ -372,9 +417,19 @@ impl EvmClient {
                 return Ok(None);
             }
         };
+        let Some(from_block) = self.deposit_scan_start(latest_block) else {
+            debug!(
+                correlation_id = %quote.correlation_id,
+                deposit_address = %quote.deposit_address,
+                profile = self.profile.as_str(),
+                "waiting for submitted EVM token deposit tx hash"
+            );
+            return Ok(None);
+        };
+
         let filter = Filter::new()
             .address(token)
-            .from_block(0u64)
+            .from_block(from_block)
             .to_block(latest_block)
             .event_signature(Transfer::SIGNATURE_HASH)
             .topic2(deposit_address.into_word());
@@ -408,9 +463,10 @@ impl EvmClient {
     async fn find_native_transfer(
         &self,
         deposit_address: Address,
+        from_block: u64,
         latest_block: u64,
     ) -> Result<Option<(B256, u64, String)>> {
-        for block_number in 0..=latest_block {
+        for block_number in from_block..=latest_block {
             let Some(block) = self
                 .provider
                 .get_block_by_number(BlockNumberOrTag::Number(block_number))
@@ -428,6 +484,14 @@ impl EvmClient {
         }
 
         Ok(None)
+    }
+
+    fn deposit_scan_start(&self, latest_block: u64) -> Option<u64> {
+        match (self.profile, self.deposit_scan_lookback_blocks) {
+            (BridgeProfile::Anvil, None) => Some(0),
+            (_, Some(lookback)) => Some(latest_block.saturating_sub(lookback)),
+            _ => None,
+        }
     }
 
     async fn handle_detected_deposit(
@@ -474,29 +538,55 @@ impl EvmClient {
         let Some(block_number) = receipt.block_number else {
             return Ok(());
         };
-        if latest_block <= block_number {
+        if !receipt.status() {
+            return Err(anyhow!(
+                "detected deposit transaction {tx_hash_string} reverted"
+            ));
+        }
+        if latest_block < block_number.saturating_add(self.required_confirmations) {
             return Ok(());
         }
 
-        let amount = if quote.origin_asset == "eth-anvil:eth" {
+        let deposit_address = Address::from_str(&quote.deposit_address)
+            .with_context(|| format!("invalid deposit address {}", quote.deposit_address))?;
+
+        let amount = if is_evm_native_asset(&quote.origin_asset) {
             let transaction = self
                 .provider
                 .get_transaction_by_hash(tx_hash)
                 .await
                 .context("failed to fetch detected native deposit transaction")?
                 .ok_or_else(|| anyhow!("deposit transaction {tx_hash_string} not found"))?;
+            if transaction.to() != Some(deposit_address) {
+                return Err(anyhow!(
+                    "deposit transaction {tx_hash_string} does not pay quoted deposit address {}",
+                    quote.deposit_address
+                ));
+            }
+            if transaction.value().is_zero() {
+                return Err(anyhow!(
+                    "deposit transaction {tx_hash_string} has zero native value"
+                ));
+            }
             transaction.value().to_string()
         } else {
-            let deposit_address = Address::from_str(&quote.deposit_address)
-                .with_context(|| format!("invalid deposit address {}", quote.deposit_address))?;
+            let token = self
+                .token_address(&quote.origin_asset)
+                .ok_or_else(|| anyhow!("missing token address for {}", quote.origin_asset))?;
             receipt
                 .inner
                 .logs()
                 .iter()
                 .find_map(|log| {
+                    if log.address() != token {
+                        return None;
+                    }
                     log.log_decode::<Transfer>()
                         .ok()
-                        .filter(|decoded| decoded.inner.data.to == deposit_address)
+                        .filter(|decoded| {
+                            decoded.inner.data.to == deposit_address
+                                && !decoded.inner.data.value.is_zero()
+                        })
                         .map(|decoded| decoded.inner.data.value.to_string())
                 })
                 .ok_or_else(|| anyhow!("failed to determine EVM token deposit amount"))?
@@ -514,24 +604,25 @@ impl EvmClient {
 }
 
 impl TokenContracts {
-    fn load(path: &Path) -> Result<Self> {
+    fn load(path: &Path, profile: BridgeProfile) -> Result<Self> {
         let file = load_token_address_file(path)?;
         let mut by_asset_id = HashMap::new();
+        let prefix = profile.evm_asset_prefix();
         if let Some(address) = file.usdc {
             by_asset_id.insert(
-                "eth-anvil:usdc".to_owned(),
+                format!("{prefix}:usdc"),
                 Address::from_str(&address).context("invalid USDC contract address")?,
             );
         }
         if let Some(address) = file.usdt {
             by_asset_id.insert(
-                "eth-anvil:usdt".to_owned(),
+                format!("{prefix}:usdt"),
                 Address::from_str(&address).context("invalid USDT contract address")?,
             );
         }
         if let Some(address) = file.btc {
             by_asset_id.insert(
-                "eth-anvil:btc".to_owned(),
+                format!("{prefix}:btc"),
                 Address::from_str(&address).context("invalid BTC contract address")?,
             );
         }
@@ -578,12 +669,9 @@ pub fn derive_address_from_mnemonic(
 }
 
 pub fn evm_quote_requires_deposit_address(origin_asset: &str, destination_asset: &str) -> bool {
-    origin_asset.starts_with("eth-anvil:") && destination_asset.starts_with("miden-testnet:")
+    crate::chains::profile::evm_quote_requires_deposit_address(origin_asset, destination_asset)
 }
 
 pub fn quote_origin_asset_is_supported(asset_id: &str) -> bool {
-    matches!(
-        asset_id,
-        "eth-anvil:eth" | "eth-anvil:usdc" | "eth-anvil:usdt" | "eth-anvil:btc"
-    )
+    crate::chains::profile::quote_origin_asset_is_supported(asset_id)
 }

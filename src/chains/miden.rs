@@ -10,6 +10,7 @@ use miden_client::{
     Client, DebugMode, RemoteTransactionProver,
     account::{AccountId, Address, AddressInterface},
     builder::ClientBuilder,
+    grpc_support::{DEVNET_PROVER_ENDPOINT, TESTNET_PROVER_ENDPOINT},
     keystore::FilesystemKeyStore,
     rpc::Endpoint,
 };
@@ -204,11 +205,11 @@ pub fn parse_account_id(value: &str) -> Result<AccountId> {
 }
 
 pub fn is_miden_asset_id(asset_id: &str) -> bool {
-    asset_id.starts_with("miden-testnet:")
+    crate::chains::profile::is_miden_asset_id(asset_id)
 }
 
 pub fn is_evm_asset_id(asset_id: &str) -> bool {
-    asset_id.starts_with("eth-anvil:")
+    crate::chains::profile::is_evm_asset_id(asset_id)
 }
 
 pub fn miden_quote_requires_deposit_address(origin_asset: &str) -> bool {
@@ -216,37 +217,18 @@ pub fn miden_quote_requires_deposit_address(origin_asset: &str) -> bool {
 }
 
 pub fn asset_symbol(asset_id: &str) -> Result<&'static str> {
-    match asset_id {
-        "miden-testnet:eth" | "eth-anvil:eth" => Ok("ETH"),
-        "miden-testnet:usdc" | "eth-anvil:usdc" => Ok("USDC"),
-        "miden-testnet:usdt" | "eth-anvil:usdt" => Ok("USDT"),
-        "miden-testnet:btc" | "eth-anvil:btc" => Ok("BTC"),
-        _ => Err(anyhow!("unsupported asset id {asset_id}")),
-    }
+    crate::chains::profile::asset_symbol(asset_id)
 }
 
 // Miden's BasicFungibleFaucet caps decimals at 12. ETH is 18-decimal on EVM,
 // so on the Miden side we represent it at 12 decimals; the bridge scales by
 // 10^6 when minting/consuming to keep amounts consistent across chains.
 pub fn asset_decimals(asset_id: &str) -> Result<u8> {
-    match asset_id {
-        "miden-testnet:eth" | "eth-anvil:eth" => Ok(12),
-        "miden-testnet:usdc" | "eth-anvil:usdc" => Ok(6),
-        "miden-testnet:usdt" | "eth-anvil:usdt" => Ok(6),
-        "miden-testnet:btc" | "eth-anvil:btc" => Ok(8),
-        _ => Err(anyhow!("unsupported asset id {asset_id}")),
-    }
+    crate::chains::profile::miden_asset_decimals(asset_id)
 }
 
 pub fn solver_liquidity_for_asset(asset_id: &str) -> Result<u64> {
-    match asset_id {
-        // 10 ETH at 12 Miden-side decimals = 10 * 10^12
-        "miden-testnet:eth" | "eth-anvil:eth" => Ok(10_000_000_000_000),
-        "miden-testnet:usdc" | "eth-anvil:usdc" => Ok(1_000_000_000_000),
-        "miden-testnet:usdt" | "eth-anvil:usdt" => Ok(1_000_000_000_000),
-        "miden-testnet:btc" | "eth-anvil:btc" => Ok(10_000_000_000),
-        _ => Err(anyhow!("unsupported asset id {asset_id}")),
-    }
+    crate::chains::profile::solver_liquidity_for_asset(asset_id)
 }
 
 async fn build_client(
@@ -265,6 +247,7 @@ async fn build_client(
     })?;
 
     let mut builder = client_builder_for_endpoint(endpoint);
+    let remote_prover_url = remote_prover_url.or_else(|| native_remote_prover_endpoint(endpoint));
     if let Some(remote_prover_url) = remote_prover_url {
         builder = builder.prover(Arc::new(
             RemoteTransactionProver::new(remote_prover_url.to_owned())
@@ -279,6 +262,16 @@ async fn build_client(
         .build()
         .await
         .context("failed to build miden client")
+}
+
+fn native_remote_prover_endpoint(endpoint: &Endpoint) -> Option<&'static str> {
+    if endpoint == &Endpoint::testnet() {
+        Some(TESTNET_PROVER_ENDPOINT)
+    } else if endpoint == &Endpoint::devnet() {
+        Some(DEVNET_PROVER_ENDPOINT)
+    } else {
+        None
+    }
 }
 
 fn client_builder_for_endpoint(endpoint: &Endpoint) -> ClientBuilder<FilesystemKeyStore> {

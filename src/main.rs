@@ -15,6 +15,7 @@ use miden_testnet_bridge::{
         miden::MidenClient,
         miden_bootstrap::bootstrap_miden,
         miden_outbound::poll_outbound_deposits,
+        profile::BridgeProfile,
     },
     core::{
         hardening::{spawn_deadline_expiry_scanner, spawn_stuck_processing_scanner},
@@ -41,10 +42,12 @@ struct Config {
     solver_private_key: String,
     evm_chain_id: u64,
     http_port: u16,
-    bridge_profile: String,
+    bridge_profile: BridgeProfile,
     bridge_demo_enabled: bool,
     bridge_ui_enabled: bool,
     bridge_cors_allow_origin: String,
+    evm_required_confirmations: u64,
+    evm_deposit_scan_lookback_blocks: Option<u64>,
     rust_log: String,
     log_format: LogFormat,
     deadline_scan_interval_secs: u64,
@@ -71,7 +74,7 @@ impl Config {
                 .unwrap_or_else(|_| "https://rpc.testnet.miden.io".to_owned()),
             miden_remote_prover_url: optional_env("MIDEN_REMOTE_PROVER_URL"),
             miden_remote_prover_timeout_secs: env::var("MIDEN_REMOTE_PROVER_TIMEOUT_SECS")
-                .unwrap_or_else(|_| "60".to_owned())
+                .unwrap_or_else(|_| "180".to_owned())
                 .parse()
                 .context("MIDEN_REMOTE_PROVER_TIMEOUT_SECS must be a valid u64")?,
             miden_store_dir: PathBuf::from(
@@ -98,11 +101,25 @@ impl Config {
                 .unwrap_or_else(|_| "8080".to_owned())
                 .parse()
                 .context("BRIDGE_HTTP_PORT must be a valid u16")?,
-            bridge_profile: env::var("BRIDGE_PROFILE").unwrap_or_else(|_| "anvil".to_owned()),
+            bridge_profile: env::var("BRIDGE_PROFILE")
+                .unwrap_or_else(|_| "anvil".to_owned())
+                .parse()
+                .context("BRIDGE_PROFILE must be anvil or sepolia")?,
             bridge_demo_enabled: parse_bool_env("BRIDGE_DEMO_ENABLED", false)?,
             bridge_ui_enabled: parse_bool_env("BRIDGE_UI_ENABLED", true)?,
             bridge_cors_allow_origin: env::var("BRIDGE_CORS_ALLOW_ORIGIN")
                 .unwrap_or_else(|_| "*".to_owned()),
+            evm_required_confirmations: env::var("EVM_REQUIRED_CONFIRMATIONS")
+                .unwrap_or_else(|_| "1".to_owned())
+                .parse()
+                .context("EVM_REQUIRED_CONFIRMATIONS must be a valid u64")?,
+            evm_deposit_scan_lookback_blocks: optional_env("EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS")
+                .map(|value| {
+                    value
+                        .parse()
+                        .context("EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS must be a valid u64")
+                })
+                .transpose()?,
             rust_log,
             log_format,
             deadline_scan_interval_secs: env::var("DEADLINE_SCAN_INTERVAL_SECS")
@@ -128,11 +145,6 @@ impl Config {
             if value.trim().is_empty() {
                 anyhow::bail!("{name} must not be empty");
             }
-        }
-
-        match self.bridge_profile.as_str() {
-            "anvil" | "sepolia" => {}
-            other => anyhow::bail!("BRIDGE_PROFILE must be anvil or sepolia, got {other}"),
         }
 
         Ok(())
@@ -206,6 +218,9 @@ async fn main() -> Result<()> {
                 solver_private_key: config.solver_private_key.clone(),
                 token_addresses_path: token_addresses_path_from_env(),
                 chain_id: config.evm_chain_id,
+                profile: config.bridge_profile,
+                required_confirmations: config.evm_required_confirmations,
+                deposit_scan_lookback_blocks: config.evm_deposit_scan_lookback_blocks,
             },
         )?
         .with_miden_client(miden.clone()),
@@ -246,7 +261,7 @@ async fn main() -> Result<()> {
         .with_runtime_options(
             config.bridge_demo_enabled,
             config.bridge_ui_enabled,
-            config.bridge_profile.clone(),
+            config.bridge_profile.as_str().to_owned(),
         );
     let app = app(state).layer(cors_layer(&config)?);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())

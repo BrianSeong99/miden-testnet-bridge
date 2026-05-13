@@ -17,6 +17,7 @@ use miden_testnet_bridge::{
     chains::{
         evm::{EvmClient, EvmConfig},
         miden::MidenClient,
+        profile::BridgeProfile,
     },
     core::{
         hardening::{run_deadline_expiry_tick, run_stuck_processing_scan_tick},
@@ -364,6 +365,9 @@ async fn build_lifecycle(
                 solver_private_key: DEFAULT_SOLVER_PRIVATE_KEY.to_owned(),
                 token_addresses_path: token_file,
                 chain_id: 271828,
+                profile: BridgeProfile::Anvil,
+                required_confirmations: 1,
+                deposit_scan_lookback_blocks: None,
             },
         )
         .expect("evm client"),

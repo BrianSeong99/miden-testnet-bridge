@@ -112,41 +112,79 @@ pub fn require_e2e(test_name: &str) {
 }
 
 pub async fn start_test(test_name: &str) -> Result<TestContext> {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time went backwards")
-        .as_nanos();
-    let miden_store_dir = format!("/var/lib/bridge/miden-store/{test_name}-{unique}");
-    let miden_master_seed_hex = hex_seed32(&format!("{test_name}:{unique}:bridge-master"));
-    let envs = vec![
-        ("MIDEN_STORE_DIR".to_owned(), miden_store_dir),
-        ("MIDEN_MASTER_SEED_HEX".to_owned(), miden_master_seed_hex),
-    ];
+    let attempts = std::env::var("E2E_STARTUP_ATTEMPTS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(2)
+        .max(1);
+    let mut last_error = None;
 
-    compose_down_with_env(&envs)?;
-    compose_up_with_env(&envs)?;
-    wait_for_healthz().await?;
+    for attempt in 1..=attempts {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos();
+        let seed_namespace = format!("{test_name}:{unique}:attempt-{attempt}");
+        let miden_store_dir = format!("/var/lib/bridge/miden-store/{test_name}-{unique}-{attempt}");
+        let miden_master_seed_hex = hex_seed32(&format!("{seed_namespace}:bridge-master"));
+        let envs = vec![
+            ("MIDEN_STORE_DIR".to_owned(), miden_store_dir),
+            ("MIDEN_MASTER_SEED_HEX".to_owned(), miden_master_seed_hex),
+        ];
 
-    let db_pool = connect_pool(&database_url(), 5)
-        .await
-        .context("failed to connect to test postgres")?;
-    let miden_store = tempdir().context("failed to create local miden store dir")?;
-    let miden = MidenClient::new(&miden_rpc_url(), miden_store.path())
-        .await
-        .context("failed to initialize host miden client")?;
-    miden
-        .sync_state()
-        .await
-        .context("failed to sync host miden")?;
+        if let Err(err) = compose_down_with_env(&envs) {
+            eprintln!("E2E startup cleanup before attempt {attempt} failed: {err:#}");
+        }
 
-    Ok(TestContext {
-        _guard: ComposeGuard::new(envs.clone()),
-        db_pool,
-        miden,
-        _miden_store: miden_store,
-        envs,
-        seed_namespace: format!("{test_name}:{unique}"),
-    })
+        let startup = async {
+            compose_up_with_env(&envs)?;
+            wait_for_healthz().await?;
+
+            let db_pool = connect_pool(&database_url(), 5)
+                .await
+                .context("failed to connect to test postgres")?;
+            let miden_store = tempdir().context("failed to create local miden store dir")?;
+            let miden = MidenClient::new(&miden_rpc_url(), miden_store.path())
+                .await
+                .context("failed to initialize host miden client")?;
+            miden
+                .sync_state()
+                .await
+                .context("failed to sync host miden")?;
+
+            Ok(TestContext {
+                _guard: ComposeGuard::new(envs.clone()),
+                db_pool,
+                miden,
+                _miden_store: miden_store,
+                envs: envs.clone(),
+                seed_namespace,
+            })
+        }
+        .await;
+
+        match startup {
+            Ok(ctx) => return Ok(ctx),
+            Err(err) if attempt < attempts => {
+                eprintln!("E2E startup attempt {attempt}/{attempts} failed; retrying: {err:#}");
+                if let Err(cleanup_err) = compose_down_with_env(&envs) {
+                    eprintln!(
+                        "E2E startup cleanup after attempt {attempt} failed: {cleanup_err:#}"
+                    );
+                }
+                last_error = Some(err);
+                sleep(Duration::from_secs(5)).await;
+            }
+            Err(err) => {
+                if let Err(cleanup_err) = compose_down_with_env(&envs) {
+                    eprintln!("E2E startup cleanup after final attempt failed: {cleanup_err:#}");
+                }
+                return Err(err);
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow!("E2E startup failed before running an attempt")))
 }
 
 impl TestContext {
@@ -490,14 +528,6 @@ pub async fn poll_status_until(
     }
 }
 
-pub async fn wait_for_intermediate_status(
-    deposit_address: &str,
-    target_status: SwapStatus,
-    timeout: Duration,
-) -> Result<StatusResponse> {
-    poll_status_until(deposit_address, None, target_status, timeout).await
-}
-
 pub async fn send_native_eth(to: &str, amount: u128) -> Result<()> {
     let signer: PrivateKeySigner = DEFAULT_FUNDED_PRIVATE_KEY.parse().expect("valid signer");
     let provider = ProviderBuilder::new()
@@ -538,7 +568,15 @@ pub fn assert_status_subsequence(actual: &[String], expected: &[&str]) {
 }
 
 fn compose_up_with_env(envs: &[(String, String)]) -> Result<()> {
-    let mut compose_envs = vec![("BRIDGE_PRICER".to_owned(), "mock".to_owned())];
+    let prover_timeout_secs =
+        std::env::var("MIDEN_REMOTE_PROVER_TIMEOUT_SECS").unwrap_or_else(|_| "180".to_owned());
+    let mut compose_envs = vec![
+        ("BRIDGE_PRICER".to_owned(), "mock".to_owned()),
+        (
+            "MIDEN_REMOTE_PROVER_TIMEOUT_SECS".to_owned(),
+            prover_timeout_secs,
+        ),
+    ];
     compose_envs.extend_from_slice(envs);
 
     // Testnet bootstrap submits several Miden transactions. The remote prover
@@ -560,6 +598,7 @@ fn compose_up_with_env(envs: &[(String, String)]) -> Result<()> {
         &compose_envs,
         Some("docker compose up failed"),
     )
+    .map_err(|err| anyhow!("{err:#}\n\n{}", compose_diagnostics(&compose_envs)))
 }
 
 fn compose_down_with_env(envs: &[(String, String)]) -> Result<()> {
@@ -599,6 +638,59 @@ fn run_command(
         stdout.trim(),
         stderr.trim()
     ))
+}
+
+fn compose_diagnostics(envs: &[(String, String)]) -> String {
+    let ps = run_command_capture(
+        "docker",
+        &["compose", "-f", "compose.yaml", "ps", "-a"],
+        envs,
+    );
+    let logs = run_command_capture(
+        "docker",
+        &[
+            "compose",
+            "-f",
+            "compose.yaml",
+            "logs",
+            "--no-color",
+            "--tail=300",
+            "bridge",
+            "postgres",
+            "anvil",
+            "anvil-init",
+        ],
+        envs,
+    );
+
+    format!(
+        "compose diagnostics\nps:\n{}\n\nlogs:\n{}",
+        ps.trim(),
+        logs.trim()
+    )
+}
+
+fn run_command_capture(program: &str, args: &[&str], envs: &[(String, String)]) -> String {
+    let mut command = Command::new(program);
+    command.args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+
+    match command.output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            format!(
+                "`{program} {}` exited {}\nstdout:\n{}\nstderr:\n{}",
+                args.join(" "),
+                output.status,
+                stdout.trim(),
+                stderr.trim()
+            )
+        }
+        Err(err) => format!("failed to spawn `{program} {}`: {err}", args.join(" ")),
+    }
 }
 
 fn docker_access_check() -> Result<()> {
