@@ -21,7 +21,13 @@ pub(crate) async fn quote(
     request: Result<Json<QuoteRequest>, JsonRejection>,
 ) -> Result<Json<QuoteResponse>, ApiError> {
     let Json(request) = request.map_err(ApiError::from_json_rejection)?;
+    Ok(Json(create_quote(&state, request).await?))
+}
 
+pub(crate) async fn create_quote(
+    state: &AppState,
+    request: QuoteRequest,
+) -> Result<QuoteResponse, ApiError> {
     if request
         .custom_recipient_msg
         .as_deref()
@@ -158,7 +164,7 @@ pub(crate) async fn quote(
         }
     }
 
-    Ok(Json(response))
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -187,7 +193,7 @@ mod tests {
             "slippageTolerance": 100.0,
             "originAsset": "eth-anvil:eth",
             "depositType": "ORIGIN_CHAIN",
-            "destinationAsset": "miden-local:eth",
+            "destinationAsset": "miden-testnet:eth",
             "amount": "1000",
             "refundTo": "0xfeed",
             "refundType": "ORIGIN_CHAIN",
@@ -203,7 +209,7 @@ mod tests {
             "depositMode": "SIMPLE",
             "swapType": "EXACT_INPUT",
             "slippageTolerance": 100.0,
-            "originAsset": "miden-local:eth",
+            "originAsset": "miden-testnet:eth",
             "depositType": "ORIGIN_CHAIN",
             "destinationAsset": "eth-anvil:eth",
             "amount": "1000",
@@ -392,7 +398,7 @@ mod tests {
         assert_eq!(memo.note_type, "PUBLIC");
         assert_eq!(memo.bridge_account_id, bootstrap.solver_account_id);
         assert_eq!(memo.storage.correlation_id, quote.correlation_id);
-        assert_eq!(memo.storage.origin_asset, "miden-local:eth");
+        assert_eq!(memo.storage.origin_asset, "miden-testnet:eth");
         assert_eq!(memo.storage.destination_asset, "eth-anvil:eth");
         assert_eq!(memo.storage.amount_in, "1000");
         assert_eq!(memo.storage.min_amount_out, "1000");

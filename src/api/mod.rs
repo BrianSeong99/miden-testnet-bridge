@@ -1,3 +1,4 @@
+pub mod demo;
 pub mod deposit_submit;
 pub mod errors;
 pub mod healthz;

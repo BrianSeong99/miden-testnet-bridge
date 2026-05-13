@@ -4,10 +4,15 @@ use tokio::time::{Duration, timeout};
 use crate::AppState;
 
 pub(crate) async fn healthz(State(state): State<AppState>) -> (StatusCode, &'static str) {
-    match timeout(Duration::from_secs(2), state.store.ping()).await {
-        Ok(Ok(())) => {}
-        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, "db unavailable"),
-        Ok(Err(_)) => return (StatusCode::SERVICE_UNAVAILABLE, "db unavailable"),
+    match check_db(&state).await {
+        Ok(()) => (StatusCode::OK, "ok"),
+        Err(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
+    }
+}
+
+pub(crate) async fn readyz(State(state): State<AppState>) -> (StatusCode, &'static str) {
+    if let Err(message) = check_db(&state).await {
+        return (StatusCode::SERVICE_UNAVAILABLE, message);
     }
 
     if let Some(miden) = &state.miden {
@@ -18,7 +23,16 @@ pub(crate) async fn healthz(State(state): State<AppState>) -> (StatusCode, &'sta
         }
     }
 
-    (StatusCode::OK, "ok")
+    (StatusCode::OK, "ready")
+}
+
+async fn check_db(state: &AppState) -> Result<(), &'static str> {
+    match timeout(Duration::from_secs(2), state.store.ping()).await {
+        Ok(Ok(())) => {}
+        Err(_) => return Err("db unavailable"),
+        Ok(Err(_)) => return Err("db unavailable"),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -84,7 +98,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_service_unavailable_when_miden_is_unreachable() {
+    async fn healthz_ignores_transient_miden_unavailability() {
         let mut state = AppState::new(memory_state());
         state.miden = Some(Arc::new(TestMiden { ok: false }));
         let app = app(state);
@@ -97,17 +111,34 @@ mod tests {
             .await
             .expect("response");
 
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn readyz_returns_service_unavailable_when_miden_is_unreachable() {
+        let mut state = AppState::new(memory_state());
+        state.miden = Some(Arc::new(TestMiden { ok: false }));
+        let app = app(state);
+        let response = app
+            .oneshot(
+                Request::get("/readyz")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
-    async fn returns_ok_when_miden_is_reachable() {
+    async fn readyz_returns_ok_when_miden_is_reachable() {
         let mut state = AppState::new(memory_state());
         state.miden = Some(Arc::new(TestMiden { ok: true }));
         let app = app(state);
         let response = app
             .oneshot(
-                Request::get("/healthz")
+                Request::get("/readyz")
                     .body(Body::empty())
                     .expect("request"),
             )

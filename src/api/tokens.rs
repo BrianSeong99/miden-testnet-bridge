@@ -49,7 +49,7 @@ pub async fn tokens(State(state): State<AppState>) -> Result<Json<Vec<TokenRespo
             contract_address: addresses.btc.clone(),
         },
         TokenResponse {
-            asset_id: "miden-local:eth".to_owned(),
+            asset_id: "miden-testnet:eth".to_owned(),
             decimals: 18.0,
             blockchain: "miden".to_owned(),
             symbol: "ETH".to_owned(),
@@ -58,7 +58,7 @@ pub async fn tokens(State(state): State<AppState>) -> Result<Json<Vec<TokenRespo
             contract_address: None,
         },
         TokenResponse {
-            asset_id: "miden-local:usdc".to_owned(),
+            asset_id: "miden-testnet:usdc".to_owned(),
             decimals: 6.0,
             blockchain: "miden".to_owned(),
             symbol: "USDC".to_owned(),
@@ -67,7 +67,7 @@ pub async fn tokens(State(state): State<AppState>) -> Result<Json<Vec<TokenRespo
             contract_address: None,
         },
         TokenResponse {
-            asset_id: "miden-local:usdt".to_owned(),
+            asset_id: "miden-testnet:usdt".to_owned(),
             decimals: 6.0,
             blockchain: "miden".to_owned(),
             symbol: "USDT".to_owned(),
@@ -76,7 +76,7 @@ pub async fn tokens(State(state): State<AppState>) -> Result<Json<Vec<TokenRespo
             contract_address: None,
         },
         TokenResponse {
-            asset_id: "miden-local:btc".to_owned(),
+            asset_id: "miden-testnet:btc".to_owned(),
             decimals: 8.0,
             blockchain: "miden".to_owned(),
             symbol: "BTC".to_owned(),

@@ -12,6 +12,11 @@
 
 ## Supported Reproduction Path
 
+- Treat this repository as a mock NEAR Intents 1Click builder sandbox. The
+  public integration surface should stay aligned with the 1Click flow:
+  `/v0/tokens`, `/v0/quote`, optional `/v0/deposit/submit`, `/v0/status`.
+- `/demo/*` and `/lab` are local sandbox helpers. Do not make third-party app
+  integrations depend on demo-only endpoints.
 - Default to public Miden testnet at `https://rpc.testnet.miden.io` plus local
   Anvil.
 - Do not use the local Miden node for acceptance evidence. Local-node mode is a
@@ -61,7 +66,16 @@
    sed -n '1,280p' docs/E2E_HANDOFF.md
    ```
 
-3. For a clean manual reproduction, use a fresh public-testnet seed:
+3. For the builder sandbox path, use:
+
+   ```bash
+   cp .env.anvil.example .env
+   make sandbox
+   ./bin/bridgectl status
+   open http://localhost:8080/lab
+   ```
+
+4. For a clean manual reproduction, use a fresh public-testnet seed:
 
    ```bash
    test -f .env || cp .env.example .env
@@ -69,23 +83,24 @@
    docker compose down --volumes --remove-orphans
    docker compose up -d --build
    curl -i http://localhost:8080/healthz
+   curl -i http://localhost:8080/readyz
    ```
 
-4. For regression evidence, run:
+5. For regression evidence, run:
 
    ```bash
    cargo fmt --check
    cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
    ```
 
-5. For full E2E evidence, run:
+6. For full E2E evidence, run:
 
    ```bash
    RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocapture --test-threads=1 2>&1 | tee e2e.log
    rg 'E2E_EVIDENCE|test result:' e2e.log
    ```
 
-6. When updating evidence, capture:
+7. When updating evidence, capture:
 
    - command line used
    - final `test result` line
@@ -95,7 +110,7 @@
    - lifecycle status sequence
    - whether the EVM side was Anvil or a public network
 
-7. Do not claim Sepolia validation unless the evidence includes live Sepolia tx
+8. Do not claim Sepolia validation unless the evidence includes live Sepolia tx
    hashes and final status responses for inbound and outbound flows.
 
 ## Review Flow

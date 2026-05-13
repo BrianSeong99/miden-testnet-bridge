@@ -107,7 +107,7 @@ impl LiveHarness {
                             "slippageTolerance": 100.0,
                             "originAsset": origin_asset,
                             "depositType": "ORIGIN_CHAIN",
-                            "destinationAsset": "miden-local:eth",
+                            "destinationAsset": "miden-testnet:eth",
                             "amount": "1000000",
                             "refundTo": "0xfeed",
                             "refundType": "ORIGIN_CHAIN",

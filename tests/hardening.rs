@@ -389,7 +389,7 @@ fn sample_quote_request(deadline: &str) -> QuoteRequest {
         slippage_tolerance: 100.0,
         origin_asset: "eth-anvil:eth".to_owned(),
         deposit_type: DepositType::OriginChain,
-        destination_asset: "miden-local:eth".to_owned(),
+        destination_asset: "miden-testnet:eth".to_owned(),
         amount: "1000".to_owned(),
         refund_to: "0xfeed".to_owned(),
         refund_type: RefundType::OriginChain,

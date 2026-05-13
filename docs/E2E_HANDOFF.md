@@ -1,15 +1,22 @@
-# E2E Handoff - `chore/13-testnet-pivot`
+# E2E Handoff - Mock 1Click Anvil + Miden Testnet Sandbox
 
-Snapshot: 2026-05-05.
+Snapshot: 2026-05-11.
 
 ## Current Status
 
 - Repo: `BrianSeong99/miden-testnet-bridge`
-- Branch: `chore/13-testnet-pivot`
+- Branch: `brian/builder-sandbox-ui`
+- Product shape: mock NEAR Intents 1Click builder sandbox. Third-party apps
+  should integrate against `/v0/tokens`, `/v0/quote`,
+  `/v0/deposit/submit`, and `/v0/status`; `/demo/*` and `/lab` are local
+  sandbox helpers only.
 - Accepted Miden path: public Miden testnet at `https://rpc.testnet.miden.io`
 - EVM path validated here: local Anvil
 - Local Miden node: legacy fallback only, not the acceptance path
-- Full serialized E2E: `5 passed; 0 failed; finished in 822.50s`
+- Full serialized E2E from the pivot run: `5 passed; 0 failed; finished in 822.50s`
+- Builder sandbox smoke from this branch: inbound click/CLI flow, recipient
+  claim, outbound funding, outbound public-note submit, and Anvil release all
+  reached `SUCCESS`.
 - Non-E2E regression set: green for `lib`, `evm`, `hardening`, `lifecycle`, `miden_bridge`, `miden_node`, `state`
 - Static evidence page: [`docs/smoke-test-report.html`](./smoke-test-report.html)
 - GitHub Pages URL: `https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html`
@@ -49,11 +56,55 @@ Important env:
 MIDEN_RPC_URL=https://rpc.testnet.miden.io
 MIDEN_MASTER_SEED_HEX=<unique 32-byte hex seed>
 MIDEN_REMOTE_PROVER_URL=        # optional override; native testnet defaults work
-MIDEN_REMOTE_PROVER_TIMEOUT_SECS=10
+MIDEN_REMOTE_PROVER_TIMEOUT_SECS=60
+BRIDGE_PROFILE=anvil
+BRIDGE_DEMO_ENABLED=1
 BRIDGE_PRICER=mock              # E2E harness only
 ```
 
 The E2E harness now injects a unique `MIDEN_MASTER_SEED_HEX` per test and Compose forwards it into the bridge container. This matters on public testnet: reusing the default seed reused the same solver account and produced `incorrect account initial commitment` failures after the first run advanced that account on-chain.
+
+## Builder Sandbox Smoke
+
+The branch adds a one-command builder path:
+
+```bash
+cp .env.anvil.example .env
+make sandbox
+open http://localhost:8080/lab
+./bin/bridgectl status
+```
+
+Runtime evidence from 2026-05-11:
+
+```text
+/healthz = 200 ok
+/readyz = 200 ready
+/demo/info: nearIntentsMock=true, runtimeProfile=anvil
+tokens: eth-anvil:{eth,usdc,usdt,btc}, miden-testnet:{eth,usdc,usdt,btc}
+```
+
+Inbound click/CLI smoke:
+
+```text
+correlation_id=038088e0-c9bd-421d-909a-2b06adbbb038
+recipient_account_id=0x9ead4197c4ac0b805d293f53a288e0
+evm_deposit_tx=0x584c214334a5b01a0ecbd60b682c63332002185699a6b710ed54a0245a3e6990
+miden_mint_tx=0x596419a82c59e174d7ee8b372079a6cb84d0be6395215bc6b13439757c08030c
+claim_tx=0xc987caf66e7030b44227feed0abe7c897065a0c43ca9dadebf6d79a2f6d191dc
+final_status=SUCCESS
+```
+
+Outbound click/CLI smoke:
+
+```text
+funding_correlation_id=933539eb-6da1-445e-a264-1170ff230ecc
+outbound_correlation_id=1c1c3191-8a9f-44e5-bfbb-a99c0a91d349
+public_bridge_note_tx=0x96c5e5efe76c4b5877e64ebf67e7ee8ee7db6165ef3159fa3b232098bdeaf8bb
+solver_consume_tx=0xa6b0f520e19c4f318df7f9171d2ceba3b70b21847edf942e027c7d308f912b2a
+evm_release_tx=0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b
+final_status=SUCCESS
+```
 
 ## Flow: Inbound EVM To Miden
 
@@ -65,7 +116,7 @@ sequenceDiagram
     participant MidenTestnet
     participant Recipient
 
-    User->>BridgeAPI: POST /v0/quote eth-anvil:eth -> miden-local:eth
+    User->>BridgeAPI: POST /v0/quote eth-anvil:eth -> miden-testnet:eth
     BridgeAPI-->>User: EVM depositAddress
     User->>Anvil: send ETH to depositAddress
     BridgeAPI->>Anvil: detect and confirm deposit
@@ -94,7 +145,7 @@ sequenceDiagram
     participant BridgePoller
     participant Anvil
 
-    UserClient->>BridgeAPI: POST /v0/quote miden-local:eth -> eth-anvil:eth
+    UserClient->>BridgeAPI: POST /v0/quote miden-testnet:eth -> eth-anvil:eth
     BridgeAPI-->>UserClient: stable bridge account + BridgeOutV1 depositMemo
     UserClient->>MidenTestnet: create public BridgeOutV1 note with assets
     BridgePoller->>MidenTestnet: sync public notes
@@ -204,7 +255,7 @@ cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridg
 Result:
 
 ```text
-34 lib tests passed
+35 lib tests passed
 4 evm tests passed
 4 hardening tests passed
 13 lifecycle tests passed
@@ -231,6 +282,14 @@ Result: passed.
 - Inbound Miden payout uses public P2ID notes so a separate client can discover the note.
 - EVM release/refund and Miden mint/consume paths persist tx ids and emit structured evidence logs.
 - Restart/resume tolerates stale pre-durable Miden idempotency keys.
+- `make sandbox` starts the public Miden testnet + Anvil builder sandbox with a
+  fresh seed when the placeholder is still present.
+- `/lab` provides a clickable UI, embedded Mermaid diagrams, live flow cards,
+  lifecycle events, and selected quote/tx artifacts.
+- `./bin/bridgectl` provides status, quote, demo, flow, log, and reset commands
+  for third-party builders and future agents.
+- `/healthz` is local liveness; `/readyz` includes Miden RPC readiness and may
+  transiently fail during public testnet RPC lag.
 
 ## Residual Risks
 

@@ -67,7 +67,7 @@ mod tests {
                             "slippageTolerance": 100.0,
                             "originAsset": "eth-anvil:eth",
                             "depositType": "ORIGIN_CHAIN",
-                            "destinationAsset": "miden-local:eth",
+                            "destinationAsset": "miden-testnet:eth",
                             "amount": "1000",
                             "refundTo": "0xfeed",
                             "refundType": "ORIGIN_CHAIN",

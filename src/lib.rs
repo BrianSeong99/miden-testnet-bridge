@@ -20,6 +20,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 pub mod api;
 pub mod chains;
 pub mod core;
+pub mod lab;
 pub mod test_support;
 pub mod types;
 
@@ -36,6 +37,9 @@ pub struct AppState {
     pub miden: Option<Arc<dyn MidenHealthCheck>>,
     pub miden_client: Option<Arc<MidenClient>>,
     pub miden_master_seed: Option<[u8; 32]>,
+    pub demo_enabled: bool,
+    pub ui_enabled: bool,
+    pub runtime_profile: String,
 }
 
 impl AppState {
@@ -48,6 +52,9 @@ impl AppState {
             miden: None,
             miden_client: None,
             miden_master_seed: None,
+            demo_enabled: false,
+            ui_enabled: false,
+            runtime_profile: "anvil".to_owned(),
         }
     }
 
@@ -60,6 +67,9 @@ impl AppState {
             miden: None,
             miden_client: None,
             miden_master_seed: None,
+            demo_enabled: false,
+            ui_enabled: false,
+            runtime_profile: "anvil".to_owned(),
         }
     }
 
@@ -78,6 +88,9 @@ impl AppState {
             miden: Some(miden.clone()),
             miden_client: Some(miden),
             miden_master_seed: Some(miden_master_seed),
+            demo_enabled: false,
+            ui_enabled: false,
+            runtime_profile: "anvil".to_owned(),
         }
     }
 
@@ -90,10 +103,25 @@ impl AppState {
         self.lifecycle = Some(lifecycle);
         self
     }
+
+    pub fn with_runtime_options(
+        mut self,
+        demo_enabled: bool,
+        ui_enabled: bool,
+        runtime_profile: String,
+    ) -> Self {
+        self.demo_enabled = demo_enabled;
+        self.ui_enabled = ui_enabled;
+        self.runtime_profile = runtime_profile;
+        self
+    }
 }
 
 pub fn app(state: AppState) -> Router {
     Router::new()
+        .route("/lab", get(lab::index))
+        .route("/lab/app.js", get(lab::app_js))
+        .route("/lab/styles.css", get(lab::styles_css))
         .route("/v0/quote", post(api::quote::quote))
         .route("/v0/status", get(api::status::status))
         .route("/v0/tokens", get(api::tokens::tokens))
@@ -105,7 +133,18 @@ pub fn app(state: AppState) -> Router {
             "/v0/any-input/withdrawals",
             get(api::withdrawals::withdrawals),
         )
+        .route("/demo/info", get(api::demo::info))
+        .route("/demo/flows", get(api::demo::flows))
+        .route("/demo/flows/{correlation_id}", get(api::demo::flow))
+        .route("/demo/flows/inbound/start", post(api::demo::start_inbound))
+        .route("/demo/flows/inbound/claim", post(api::demo::claim_inbound))
+        .route("/demo/flows/outbound/fund", post(api::demo::fund_outbound))
+        .route(
+            "/demo/flows/outbound/submit",
+            post(api::demo::submit_outbound),
+        )
         .route("/healthz", get(api::healthz::healthz))
+        .route("/readyz", get(api::healthz::readyz))
         .layer(RedactAuthorizationLayer)
         .with_state(state)
 }

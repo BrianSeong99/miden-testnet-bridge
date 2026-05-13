@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use axum::http::{HeaderValue, Method};
 use miden_testnet_bridge::{
     AppState, LogFormat, app, arc_store,
     chains::{
@@ -24,6 +25,7 @@ use miden_testnet_bridge::{
     init_tracing,
 };
 use sqlx::migrate::Migrator;
+use tower_http::cors::CorsLayer;
 use tracing::info;
 
 #[derive(Clone, Debug)]
@@ -39,6 +41,10 @@ struct Config {
     solver_private_key: String,
     evm_chain_id: u64,
     http_port: u16,
+    bridge_profile: String,
+    bridge_demo_enabled: bool,
+    bridge_ui_enabled: bool,
+    bridge_cors_allow_origin: String,
     rust_log: String,
     log_format: LogFormat,
     deadline_scan_interval_secs: u64,
@@ -65,7 +71,7 @@ impl Config {
                 .unwrap_or_else(|_| "https://rpc.testnet.miden.io".to_owned()),
             miden_remote_prover_url: optional_env("MIDEN_REMOTE_PROVER_URL"),
             miden_remote_prover_timeout_secs: env::var("MIDEN_REMOTE_PROVER_TIMEOUT_SECS")
-                .unwrap_or_else(|_| "10".to_owned())
+                .unwrap_or_else(|_| "60".to_owned())
                 .parse()
                 .context("MIDEN_REMOTE_PROVER_TIMEOUT_SECS must be a valid u64")?,
             miden_store_dir: PathBuf::from(
@@ -92,6 +98,11 @@ impl Config {
                 .unwrap_or_else(|_| "8080".to_owned())
                 .parse()
                 .context("BRIDGE_HTTP_PORT must be a valid u16")?,
+            bridge_profile: env::var("BRIDGE_PROFILE").unwrap_or_else(|_| "anvil".to_owned()),
+            bridge_demo_enabled: parse_bool_env("BRIDGE_DEMO_ENABLED", false)?,
+            bridge_ui_enabled: parse_bool_env("BRIDGE_UI_ENABLED", true)?,
+            bridge_cors_allow_origin: env::var("BRIDGE_CORS_ALLOW_ORIGIN")
+                .unwrap_or_else(|_| "*".to_owned()),
             rust_log,
             log_format,
             deadline_scan_interval_secs: env::var("DEADLINE_SCAN_INTERVAL_SECS")
@@ -119,7 +130,23 @@ impl Config {
             }
         }
 
+        match self.bridge_profile.as_str() {
+            "anvil" | "sepolia" => {}
+            other => anyhow::bail!("BRIDGE_PROFILE must be anvil or sepolia, got {other}"),
+        }
+
         Ok(())
+    }
+}
+
+fn parse_bool_env(name: &str, default: bool) -> Result<bool> {
+    match env::var(name) {
+        Ok(value) => match value.as_str() {
+            "1" | "true" | "TRUE" | "yes" | "YES" => Ok(true),
+            "0" | "false" | "FALSE" | "no" | "NO" => Ok(false),
+            other => anyhow::bail!("{name} must be a boolean, got {other}"),
+        },
+        Err(_) => Ok(default),
     }
 }
 
@@ -215,8 +242,13 @@ async fn main() -> Result<()> {
     });
 
     let state = AppState::with_clients(store, pricer, evm, miden, miden_master_seed)
-        .with_lifecycle(lifecycle);
-    let app = app(state);
+        .with_lifecycle(lifecycle)
+        .with_runtime_options(
+            config.bridge_demo_enabled,
+            config.bridge_ui_enabled,
+            config.bridge_profile.clone(),
+        );
+    let app = app(state).layer(cors_layer(&config)?);
     let listener = tokio::net::TcpListener::bind(config.listen_addr())
         .await
         .context("failed to bind HTTP listener")?;
@@ -226,4 +258,18 @@ async fn main() -> Result<()> {
     axum::serve(listener, app)
         .await
         .context("HTTP server stopped unexpectedly")
+}
+
+fn cors_layer(config: &Config) -> Result<CorsLayer> {
+    let layer = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(tower_http::cors::Any);
+    if config.bridge_cors_allow_origin.trim() == "*" {
+        Ok(layer.allow_origin(tower_http::cors::Any))
+    } else {
+        Ok(layer.allow_origin(
+            HeaderValue::from_str(&config.bridge_cors_allow_origin)
+                .context("BRIDGE_CORS_ALLOW_ORIGIN must be a valid header value")?,
+        ))
+    }
 }

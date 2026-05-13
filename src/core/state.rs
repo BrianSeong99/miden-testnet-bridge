@@ -46,6 +46,18 @@ pub struct QuoteRecord {
     pub idempotency_keys: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LifecycleEventRecord {
+    pub id: i64,
+    pub correlation_id: Uuid,
+    pub from_status: Option<String>,
+    pub to_status: String,
+    pub event_kind: String,
+    pub reason: Option<String>,
+    pub metadata: Option<Value>,
+    pub created_at: OffsetDateTime,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeadlineScanQuote {
     pub correlation_id: Uuid,
@@ -162,6 +174,13 @@ pub trait StateStore: Send + Sync {
         &self,
         correlation_id: Uuid,
     ) -> Result<Option<QuoteRecord>, StateStoreError>;
+
+    async fn list_recent_quotes(&self, limit: i64) -> Result<Vec<QuoteRecord>, StateStoreError>;
+
+    async fn list_lifecycle_events(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Vec<LifecycleEventRecord>, StateStoreError>;
 
     async fn record_event(
         &self,
@@ -382,6 +401,67 @@ impl StateStore for PostgresStateStore {
         row.map(map_quote_record).transpose()
     }
 
+    async fn list_recent_quotes(&self, limit: i64) -> Result<Vec<QuoteRecord>, StateStoreError> {
+        let rows = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT
+                q.correlation_id,
+                q.quote_request_json,
+                q.quote_response_json,
+                q.status,
+                q.updated_at,
+                c.evm_deposit_derivation_path,
+                c.miden_deposit_account_id,
+                c.miden_deposit_seed_hex,
+                c.evm_deposit_tx_hashes,
+                c.evm_release_tx_hashes,
+                c.miden_mint_tx_ids,
+                c.miden_consume_tx_ids,
+                c.evm_refund_tx_hashes,
+                c.miden_refund_tx_ids,
+                c.intent_hashes,
+                c.near_tx_hashes,
+                c.idempotency_keys
+            FROM quotes q
+            INNER JOIN chain_artifacts c ON c.correlation_id = q.correlation_id
+            ORDER BY q.created_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_quote_record).collect()
+    }
+
+    async fn list_lifecycle_events(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<Vec<LifecycleEventRecord>, StateStoreError> {
+        let rows = query::<sqlx_postgres::Postgres>(
+            r#"
+            SELECT
+                id,
+                correlation_id,
+                from_status,
+                to_status,
+                event_kind,
+                reason,
+                metadata,
+                created_at
+            FROM lifecycle_events
+            WHERE correlation_id = $1
+            ORDER BY id ASC
+            "#,
+        )
+        .bind(correlation_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(map_lifecycle_event_record).collect()
+    }
+
     async fn record_event(
         &self,
         correlation_id: Uuid,
@@ -592,7 +672,7 @@ impl StateStore for PostgresStateStore {
             FROM quotes q
             INNER JOIN chain_artifacts c ON c.correlation_id = q.correlation_id
             WHERE q.status IN ('PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING')
-              AND q.quote_request_json->>'originAsset' LIKE 'miden-local:%'
+              AND q.quote_request_json->>'originAsset' LIKE 'miden-testnet:%'
               AND (
                   q.deposit_memo IS NOT NULL
                   OR (
@@ -809,6 +889,19 @@ fn map_quote_record(row: PgRow) -> Result<QuoteRecord, StateStoreError> {
         intent_hashes: jsonb_array_to_vec(&row, "intent_hashes")?,
         near_tx_hashes: jsonb_array_to_vec(&row, "near_tx_hashes")?,
         idempotency_keys: jsonb_array_to_vec(&row, "idempotency_keys")?,
+    })
+}
+
+fn map_lifecycle_event_record(row: PgRow) -> Result<LifecycleEventRecord, StateStoreError> {
+    Ok(LifecycleEventRecord {
+        id: row.try_get("id")?,
+        correlation_id: row.try_get("correlation_id")?,
+        from_status: row.try_get("from_status")?,
+        to_status: row.try_get("to_status")?,
+        event_kind: row.try_get("event_kind")?,
+        reason: row.try_get("reason")?,
+        metadata: row.try_get("metadata")?,
+        created_at: row.try_get("created_at")?,
     })
 }
 

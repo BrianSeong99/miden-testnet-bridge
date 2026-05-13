@@ -3,7 +3,7 @@
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Miden Testnet Bridge - Smoke Test Report</title>
+  <title>Miden Testnet Bridge 1Click Mock - Smoke Test Report</title>
   <style type="text/css">
     * {
       box-sizing: border-box;
@@ -109,6 +109,10 @@
       overflow-wrap: anywhere;
     }
 
+    td code {
+      overflow-wrap: anywhere;
+    }
+
     .pass {
       color: #146633;
       font-weight: 700;
@@ -176,13 +180,19 @@
 </head>
 <body>
   <div class="page">
-    <h1>Miden Testnet Bridge Smoke Test Report</h1>
-    <p class="muted">Generated 2026-05-05 for branch <code>chore/13-testnet-pivot</code>.</p>
-    <div class="status">PASS: 5 E2E tests passed, 0 failed</div>
+    <h1>Miden Testnet Bridge 1Click Mock Smoke Test Report</h1>
+    <p class="muted">
+      Updated 2026-05-11 for branch <code>brian/builder-sandbox-ui</code>.
+      Full E2E suite evidence was captured on 2026-05-05; clickable sandbox smoke
+      was captured on 2026-05-11.
+    </p>
+    <div class="status">PASS: mock 1Click sandbox works on Anvil + Miden testnet</div>
 
     <p>
       This report proves the current public-note bridge design against public Miden testnet and local Anvil.
-      It does not claim Sepolia validation yet.
+      The repo is a mock NEAR Intents 1Click builder sandbox: apps should use
+      the same quote, deposit, submit, and status shape they would use against a
+      hosted 1Click service. It does not claim Sepolia validation yet.
     </p>
 
     <table summary="Smoke test environment and result">
@@ -190,6 +200,14 @@
         <tr>
           <th>Result</th>
           <td><code>test result: ok. 5 passed; 0 failed; finished in 822.50s</code></td>
+        </tr>
+        <tr>
+          <th>Builder smoke</th>
+          <td><code>make sandbox</code>, <code>/lab</code>, and <code>./bin/bridgectl status</code> validated inbound claim plus outbound release on 2026-05-11.</td>
+        </tr>
+        <tr>
+          <th>Mock API surface</th>
+          <td><code>GET /v0/tokens</code>, <code>POST /v0/quote</code>, <code>POST /v0/deposit/submit</code>, <code>GET /v0/status</code></td>
         </tr>
         <tr>
           <th>Miden network</th>
@@ -209,6 +227,56 @@
             <a href="https://github.com/BrianSeong99/miden-testnet-bridge/issues/29#issuecomment-4379012229">E2E issue comment</a>
             and
             <a href="https://github.com/BrianSeong99/miden-testnet-bridge/issues/35#issuecomment-4379012513">trace evidence comment</a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Builder Sandbox Smoke</h2>
+    <p>
+      The clickable lab uses <code>/demo/*</code> helpers for browser-only
+      orchestration, but the public integration contract remains the mock
+      NEAR Intents 1Click <code>/v0/*</code> surface.
+    </p>
+    <table class="evidence" summary="Builder sandbox smoke evidence">
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Status</th>
+          <th>Evidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Runtime and tokens</td>
+          <td class="pass">PASS</td>
+          <td>
+            <code>/healthz = 200 ok</code><br>
+            <code>/readyz = 200 ready</code><br>
+            <code>/demo/info nearIntentsMock=true runtimeProfile=anvil</code><br>
+            <code>eth-anvil:{eth,usdc,usdt,btc}</code> and
+            <code>miden-testnet:{eth,usdc,usdt,btc}</code>
+          </td>
+        </tr>
+        <tr>
+          <td>Inbound: Anvil deposit to Miden P2ID note, then recipient claim</td>
+          <td class="pass">PASS</td>
+          <td>
+            <code>correlation_id=038088e0-c9bd-421d-909a-2b06adbbb038</code><br>
+            <code>evm_deposit_tx=0x584c214334a5b01a0ecbd60b682c63332002185699a6b710ed54a0245a3e6990</code><br>
+            <a href="https://testnet.midenscan.com/tx/0x596419a82c59e174d7ee8b372079a6cb84d0be6395215bc6b13439757c08030c"><code>miden_mint_tx=0x596419a8...7c08030c</code></a><br>
+            <a href="https://testnet.midenscan.com/tx/0xc987caf66e7030b44227feed0abe7c897065a0c43ca9dadebf6d79a2f6d191dc"><code>claim_tx=0xc987caf6...f6d191dc</code></a>
+          </td>
+        </tr>
+        <tr>
+          <td>Outbound: Miden BridgeOutV1 note to Anvil release</td>
+          <td class="pass">PASS</td>
+          <td>
+            <code>funding_correlation_id=933539eb-6da1-445e-a264-1170ff230ecc</code><br>
+            <code>outbound_correlation_id=1c1c3191-8a9f-44e5-bfbb-a99c0a91d349</code><br>
+            <a href="https://testnet.midenscan.com/tx/0x96c5e5efe76c4b5877e64ebf67e7ee8ee7db6165ef3159fa3b232098bdeaf8bb"><code>public_bridge_note_tx=0x96c5e5ef...bdeaf8bb</code></a><br>
+            <a href="https://testnet.midenscan.com/tx/0xa6b0f520e19c4f318df7f9171d2ceba3b70b21847edf942e027c7d308f912b2a"><code>solver_consume_tx=0xa6b0f520...8f912b2a</code></a><br>
+            <code>evm_release_tx=0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b</code>
           </td>
         </tr>
       </tbody>
@@ -247,7 +315,7 @@
     participant Miden
     participant Recipient
 
-    User->>BridgeAPI: Request quote eth-anvil:eth to miden-local:eth
+    User->>BridgeAPI: Request quote eth-anvil:eth to miden-testnet:eth
     BridgeAPI-->>User: Return EVM deposit address
     User->>Anvil: Send deposit tx
     BridgeAPI->>Anvil: Detect and confirm deposit
@@ -270,7 +338,7 @@
     participant Poller
     participant Anvil
 
-    User->>BridgeAPI: Request quote miden-local:eth to eth-anvil:eth
+    User->>BridgeAPI: Request quote miden-testnet:eth to eth-anvil:eth
     BridgeAPI-->>User: Return bridge account plus BridgeOutV1 memo
     User->>Miden: Create public BridgeOutV1 note with assets
     Poller->>Miden: Sync and scan public notes

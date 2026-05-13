@@ -194,7 +194,7 @@ async fn outbound_flow_consumes_note_and_releases_on_evm() {
                         "depositMode": "SIMPLE",
                         "swapType": "EXACT_INPUT",
                         "slippageTolerance": 100.0,
-                        "originAsset": "miden-local:usdc",
+                        "originAsset": "miden-testnet:usdc",
                         "depositType": "ORIGIN_CHAIN",
                         "destinationAsset": "eth-anvil:usdc",
                         "amount": "1000000",

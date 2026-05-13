@@ -178,8 +178,14 @@ impl TestContext {
         refund_to: &str,
     ) -> Result<QuoteResponse> {
         let (origin_asset, destination_asset) = match direction {
-            Direction::Inbound => (format!("eth-anvil:{asset}"), format!("miden-local:{asset}")),
-            Direction::Outbound => (format!("miden-local:{asset}"), format!("eth-anvil:{asset}")),
+            Direction::Inbound => (
+                format!("eth-anvil:{asset}"),
+                format!("miden-testnet:{asset}"),
+            ),
+            Direction::Outbound => (
+                format!("miden-testnet:{asset}"),
+                format!("eth-anvil:{asset}"),
+            ),
         };
         let payload = json!({
             "dry": false,

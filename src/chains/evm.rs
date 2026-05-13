@@ -578,7 +578,7 @@ pub fn derive_address_from_mnemonic(
 }
 
 pub fn evm_quote_requires_deposit_address(origin_asset: &str, destination_asset: &str) -> bool {
-    origin_asset.starts_with("eth-anvil:") && destination_asset.starts_with("miden-local:")
+    origin_asset.starts_with("eth-anvil:") && destination_asset.starts_with("miden-testnet:")
 }
 
 pub fn quote_origin_asset_is_supported(asset_id: &str) -> bool {

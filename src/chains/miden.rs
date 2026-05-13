@@ -204,7 +204,7 @@ pub fn parse_account_id(value: &str) -> Result<AccountId> {
 }
 
 pub fn is_miden_asset_id(asset_id: &str) -> bool {
-    asset_id.starts_with("miden-local:")
+    asset_id.starts_with("miden-testnet:")
 }
 
 pub fn is_evm_asset_id(asset_id: &str) -> bool {
@@ -217,10 +217,10 @@ pub fn miden_quote_requires_deposit_address(origin_asset: &str) -> bool {
 
 pub fn asset_symbol(asset_id: &str) -> Result<&'static str> {
     match asset_id {
-        "miden-local:eth" | "eth-anvil:eth" => Ok("ETH"),
-        "miden-local:usdc" | "eth-anvil:usdc" => Ok("USDC"),
-        "miden-local:usdt" | "eth-anvil:usdt" => Ok("USDT"),
-        "miden-local:btc" | "eth-anvil:btc" => Ok("BTC"),
+        "miden-testnet:eth" | "eth-anvil:eth" => Ok("ETH"),
+        "miden-testnet:usdc" | "eth-anvil:usdc" => Ok("USDC"),
+        "miden-testnet:usdt" | "eth-anvil:usdt" => Ok("USDT"),
+        "miden-testnet:btc" | "eth-anvil:btc" => Ok("BTC"),
         _ => Err(anyhow!("unsupported asset id {asset_id}")),
     }
 }
@@ -230,10 +230,10 @@ pub fn asset_symbol(asset_id: &str) -> Result<&'static str> {
 // 10^6 when minting/consuming to keep amounts consistent across chains.
 pub fn asset_decimals(asset_id: &str) -> Result<u8> {
     match asset_id {
-        "miden-local:eth" | "eth-anvil:eth" => Ok(12),
-        "miden-local:usdc" | "eth-anvil:usdc" => Ok(6),
-        "miden-local:usdt" | "eth-anvil:usdt" => Ok(6),
-        "miden-local:btc" | "eth-anvil:btc" => Ok(8),
+        "miden-testnet:eth" | "eth-anvil:eth" => Ok(12),
+        "miden-testnet:usdc" | "eth-anvil:usdc" => Ok(6),
+        "miden-testnet:usdt" | "eth-anvil:usdt" => Ok(6),
+        "miden-testnet:btc" | "eth-anvil:btc" => Ok(8),
         _ => Err(anyhow!("unsupported asset id {asset_id}")),
     }
 }
@@ -241,10 +241,10 @@ pub fn asset_decimals(asset_id: &str) -> Result<u8> {
 pub fn solver_liquidity_for_asset(asset_id: &str) -> Result<u64> {
     match asset_id {
         // 10 ETH at 12 Miden-side decimals = 10 * 10^12
-        "miden-local:eth" | "eth-anvil:eth" => Ok(10_000_000_000_000),
-        "miden-local:usdc" | "eth-anvil:usdc" => Ok(1_000_000_000_000),
-        "miden-local:usdt" | "eth-anvil:usdt" => Ok(1_000_000_000_000),
-        "miden-local:btc" | "eth-anvil:btc" => Ok(10_000_000_000),
+        "miden-testnet:eth" | "eth-anvil:eth" => Ok(10_000_000_000_000),
+        "miden-testnet:usdc" | "eth-anvil:usdc" => Ok(1_000_000_000_000),
+        "miden-testnet:usdt" | "eth-anvil:usdt" => Ok(1_000_000_000_000),
+        "miden-testnet:btc" | "eth-anvil:btc" => Ok(10_000_000_000),
         _ => Err(anyhow!("unsupported asset id {asset_id}")),
     }
 }
