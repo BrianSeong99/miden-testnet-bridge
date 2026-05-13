@@ -30,6 +30,7 @@ use miden_testnet_bridge::{
         },
         miden_inbound::mint_to_user,
         miden_outbound::{parse_persisted_miden_seed_hex, poll_outbound_deposits_once},
+        profile::BridgeProfile,
     },
     core::{lifecycle::DefaultLifecycle, pricer::MockPricer},
     test_support::memory_state,
@@ -337,6 +338,9 @@ async fn live_evm_client() -> Option<(
                     .ok()
                     .and_then(|value| value.parse().ok())
                     .unwrap_or(271828),
+                profile: BridgeProfile::Anvil,
+                required_confirmations: 1,
+                deposit_scan_lookback_blocks: None,
             },
         )
         .expect("EVM client"),

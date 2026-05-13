@@ -838,14 +838,7 @@ async fn last_confirmed_amount(
 }
 
 fn evm_asset_for_origin(evm: &EvmClient, asset_id: &str) -> Result<EvmAsset> {
-    match asset_id {
-        "eth-anvil:eth" => Ok(EvmAsset::NativeEth),
-        "eth-anvil:usdc" | "eth-anvil:usdt" | "eth-anvil:btc" => evm
-            .token_address(asset_id)
-            .map(EvmAsset::Erc20)
-            .ok_or_else(|| anyhow!("missing token address for {asset_id}")),
-        _ => Err(anyhow!("unsupported EVM asset {asset_id}")),
-    }
+    evm.asset_for_asset_id(asset_id)
 }
 
 fn parse_amount_f64(raw: &str) -> Result<f64> {

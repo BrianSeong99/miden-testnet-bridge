@@ -350,14 +350,6 @@ fn extract_fungible_asset(note: &Note) -> Result<(miden_client::asset::FungibleA
 }
 
 fn evm_asset_for_destination(evm: &EvmClient, destination_asset: &str) -> Result<EvmAsset> {
-    match destination_asset {
-        "eth-anvil:eth" => Ok(EvmAsset::NativeEth),
-        "eth-anvil:usdc" | "eth-anvil:usdt" | "eth-anvil:btc" => evm
-            .token_address(destination_asset)
-            .map(EvmAsset::Erc20)
-            .ok_or_else(|| anyhow!("missing token address for {destination_asset}")),
-        _ => Err(anyhow!(
-            "unsupported outbound destination asset {destination_asset}"
-        )),
-    }
+    evm.asset_for_asset_id(destination_asset)
+        .with_context(|| format!("unsupported outbound destination asset {destination_asset}"))
 }

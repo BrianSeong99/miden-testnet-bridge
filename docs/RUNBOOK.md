@@ -55,6 +55,40 @@ Remediation:
    docker compose logs -f bridge
    ```
 
+## Sepolia Deposit Does Not Progress
+
+Sepolia mode intentionally does not scan from genesis. A quote stays in
+`PENDING_DEPOSIT` until the builder submits the real deposit tx hash:
+
+```bash
+curl -s http://localhost:8080/v0/deposit/submit \
+  -H 'content-type: application/json' \
+  -d '{"txHash":"0x...","depositAddress":"0x..."}'
+```
+
+Diagnostic commands:
+
+```bash
+./bin/bridgectl status
+docker compose -f compose.sepolia.yaml --env-file .env logs bridge --tail=300 | rg "deposit|EVM|sepolia|reverted|does not pay"
+docker compose -f compose.sepolia.yaml --env-file .env exec bridge printenv EVM_RPC_URL BRIDGE_PROFILE EVM_REQUIRED_CONFIRMATIONS EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS
+docker compose -f compose.sepolia.yaml --env-file .env exec postgres psql -U postgres -d miden_bridge -c "
+  SELECT correlation_id, deposit_address, status, evm_deposit_tx_hashes
+  FROM quotes
+  JOIN chain_artifacts USING (correlation_id)
+  ORDER BY quotes.created_at DESC
+  LIMIT 10;
+"
+```
+
+If `/v0/deposit/submit` was called and the quote remains in
+`KNOWN_DEPOSIT_TX`, verify the submitted Sepolia transaction:
+
+- `to` must equal the quoted `depositAddress` for native ETH.
+- `value` must be nonzero.
+- the receipt must be successful.
+- the receipt block must have at least `EVM_REQUIRED_CONFIRMATIONS`.
+
 ## Miden RPC Unreachable
 
 Symptoms:

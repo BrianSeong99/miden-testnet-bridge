@@ -11,6 +11,7 @@ use miden_testnet_bridge::{
     chains::{
         evm::{EvmClient, EvmConfig},
         miden::MidenClient,
+        profile::BridgeProfile,
     },
     core::{
         lifecycle::{
@@ -484,6 +485,9 @@ async fn build_lifecycle(store: DynStateStore, pricer: Arc<dyn Pricer>) -> Arc<D
                 solver_private_key: DEFAULT_SOLVER_PRIVATE_KEY.to_owned(),
                 token_addresses_path: token_file,
                 chain_id: 271828,
+                profile: BridgeProfile::Anvil,
+                required_confirmations: 1,
+                deposit_scan_lookback_blocks: None,
             },
         )
         .unwrap(),

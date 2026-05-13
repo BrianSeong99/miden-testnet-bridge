@@ -21,6 +21,7 @@ use miden_testnet_bridge::{
         EvmAsset, EvmClient, EvmConfig, derivation_path, derive_address_from_mnemonic,
         load_token_address_file,
     },
+    chains::profile::BridgeProfile,
     core::lifecycle::{DynLifecycle, Lifecycle, LifecycleEvent},
     test_support::memory_state,
     types::{QuoteResponse, StatusResponse},
@@ -71,6 +72,9 @@ impl LiveHarness {
                         .ok()
                         .and_then(|value| value.parse().ok())
                         .unwrap_or(271828),
+                    profile: BridgeProfile::Anvil,
+                    required_confirmations: 1,
+                    deposit_scan_lookback_blocks: None,
                 },
             )
             .expect("EVM client"),

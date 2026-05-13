@@ -16,6 +16,7 @@ use rand::{RngCore, SeedableRng, rngs::StdRng};
 use crate::{
     chains::miden::{MidenClient, asset_decimals, solver_liquidity_for_asset},
     chains::miden_deposit_account::{build_wallet_account, derive_seed},
+    chains::profile::asset_suffix,
     core::state::{DynStateStore, MidenBootstrapRecord},
 };
 
@@ -37,11 +38,11 @@ pub struct BootstrapState {
 
 impl BootstrapState {
     pub fn faucet_id_for_asset(&self, asset_id: &str) -> Result<AccountId> {
-        match asset_id {
-            "miden-testnet:eth" | "eth-anvil:eth" => Ok(self.eth_faucet_account_id),
-            "miden-testnet:usdc" | "eth-anvil:usdc" => Ok(self.usdc_faucet_account_id),
-            "miden-testnet:usdt" | "eth-anvil:usdt" => Ok(self.usdt_faucet_account_id),
-            "miden-testnet:btc" | "eth-anvil:btc" => Ok(self.btc_faucet_account_id),
+        match asset_suffix(asset_id) {
+            Some("eth") => Ok(self.eth_faucet_account_id),
+            Some("usdc") => Ok(self.usdc_faucet_account_id),
+            Some("usdt") => Ok(self.usdt_faucet_account_id),
+            Some("btc") => Ok(self.btc_faucet_account_id),
             _ => Err(anyhow!("unsupported asset id {asset_id}")),
         }
     }

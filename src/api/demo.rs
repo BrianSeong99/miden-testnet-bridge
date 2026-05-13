@@ -387,12 +387,16 @@ pub async fn submit_outbound(
 }
 
 fn ensure_demo_enabled(state: &AppState) -> Result<(), ApiError> {
-    if state.demo_enabled {
-        Ok(())
-    } else {
+    if !state.demo_enabled {
         Err(ApiError::bad_request(
             "demo endpoints are disabled; set BRIDGE_DEMO_ENABLED=1",
         ))
+    } else if state.runtime_profile != "anvil" {
+        Err(ApiError::bad_request(
+            "demo endpoints only support BRIDGE_PROFILE=anvil",
+        ))
+    } else {
+        Ok(())
     }
 }
 

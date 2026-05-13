@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::common::{
     Direction, LOCAL_ETH_E2E_AMOUNT, LOCAL_ETH_E2E_AMOUNT_STR, assert_status_subsequence,
-    require_e2e, send_native_eth, start_test, wait_for_intermediate_status,
+    require_e2e, send_native_eth, start_test,
 };
 
 #[tokio::test]
@@ -32,16 +32,10 @@ async fn slippage_exceeded_refunds_origin_chain() -> Result<()> {
         .clone()
         .expect("deposit address");
     let correlation_id = Uuid::parse_str(&quote.correlation_id)?;
-
-    send_native_eth(&deposit_address, LOCAL_ETH_E2E_AMOUNT).await?;
-    wait_for_intermediate_status(
-        &deposit_address,
-        miden_testnet_bridge::types::SwapStatus::KnownDepositTx,
-        Duration::from_secs(30),
-    )
-    .await?;
     ctx.force_min_amount_out(correlation_id, "10000000000000")
         .await?;
+
+    send_native_eth(&deposit_address, LOCAL_ETH_E2E_AMOUNT).await?;
 
     let status = ctx
         .poll_status_until(

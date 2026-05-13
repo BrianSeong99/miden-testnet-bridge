@@ -23,10 +23,14 @@
   legacy/manual fallback only.
 - Use native `miden-client` network behavior for testnet and devnet. Do not
   hand-assemble local-node defaults when the RPC URL is a known public network.
-- Public testnet uses the native `miden-client` remote prover defaults unless a
-  task explicitly provides `MIDEN_REMOTE_PROVER_URL`.
+- Public testnet uses the native `miden-client` remote prover endpoint with the
+  configured `MIDEN_REMOTE_PROVER_TIMEOUT_SECS`. Override the endpoint only when
+  a task explicitly provides `MIDEN_REMOTE_PROVER_URL`.
 - Keep `RUSTFLAGS='-C debug-assertions=no'` on E2E commands until the Miden
   debug-assertion path is no longer present.
+- Sepolia profile uses `eth-sepolia:*` asset ids. Do not scan Sepolia from
+  genesis; require `/v0/deposit/submit` with a real tx hash unless a task
+  explicitly sets a bounded `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS`.
 
 ## Bridge Semantics
 
@@ -112,6 +116,15 @@
 
 8. Do not claim Sepolia validation unless the evidence includes live Sepolia tx
    hashes and final status responses for inbound and outbound flows.
+
+9. For Sepolia readiness smoke without claiming live validation:
+
+   ```bash
+   cp .env.sepolia.example .env
+   # fill RPC, mnemonic, funded solver key, and a fresh MIDEN_MASTER_SEED_HEX
+   make sepolia
+   ./bin/bridgectl tokens
+   ```
 
 ## Review Flow
 

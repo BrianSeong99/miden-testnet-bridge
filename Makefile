@@ -1,4 +1,4 @@
-.PHONY: genesis e2e e2e-local-node sandbox sandbox-down sandbox-reset sandbox-logs sandbox-status bridgectl
+.PHONY: genesis e2e e2e-local-node sandbox sandbox-down sandbox-reset sandbox-logs sandbox-status sepolia sepolia-down sepolia-reset sepolia-logs bridgectl
 
 # Local-node targets are legacy/manual only. The supported E2E path uses
 # public Miden testnet plus Anvil.
@@ -35,6 +35,31 @@ sandbox-logs:
 
 sandbox-status:
 	./bin/bridgectl status
+
+sepolia:
+	@if [ ! -f .env ]; then cp .env.sepolia.example .env; fi
+	@if grep -q '^MIDEN_MASTER_SEED_HEX=replace-with-32-byte-hex-seed' .env; then \
+		seed="$$(openssl rand -hex 32)"; \
+		perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$$seed/" .env; \
+		echo "Generated MIDEN_MASTER_SEED_HEX=$$seed"; \
+	fi
+	@if grep -Eq 'replace-with|sepolia.infura.io/v3/replace-me' .env; then \
+		echo "Fill Sepolia RPC, MASTER_MNEMONIC, and funded SOLVER_PRIVATE_KEY in .env before running make sepolia"; \
+		exit 1; \
+	fi
+	docker compose -f compose.sepolia.yaml --env-file .env up -d --build --wait --wait-timeout 600
+	@port="$$(grep -E '^BRIDGE_HTTP_PORT=' .env | tail -1 | cut -d= -f2)"; port="$${port:-8080}"; \
+		echo "Bridge API: http://localhost:$$port"; \
+		echo "Status:     ./bin/bridgectl status"
+
+sepolia-down:
+	docker compose -f compose.sepolia.yaml --env-file .env down --remove-orphans
+
+sepolia-reset:
+	docker compose -f compose.sepolia.yaml --env-file .env down --volumes --remove-orphans
+
+sepolia-logs:
+	docker compose -f compose.sepolia.yaml --env-file .env logs -f bridge
 
 bridgectl:
 	./bin/bridgectl status

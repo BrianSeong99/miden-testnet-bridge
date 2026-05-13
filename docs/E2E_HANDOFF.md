@@ -1,19 +1,23 @@
 # E2E Handoff - Mock 1Click Anvil + Miden Testnet Sandbox
 
-Snapshot: 2026-05-11.
+Snapshot: 2026-05-13.
 
 ## Current Status
 
 - Repo: `BrianSeong99/miden-testnet-bridge`
-- Branch: `brian/builder-sandbox-ui`
+- Branch: `brian/sepolia-integration`
 - Product shape: mock NEAR Intents 1Click builder sandbox. Third-party apps
   should integrate against `/v0/tokens`, `/v0/quote`,
   `/v0/deposit/submit`, and `/v0/status`; `/demo/*` and `/lab` are local
   sandbox helpers only.
 - Accepted Miden path: public Miden testnet at `https://rpc.testnet.miden.io`
 - EVM path validated here: local Anvil
+- Sepolia readiness: profile-aware `eth-sepolia:*` assets, native ETH quote
+  support, Sepolia-only Compose target, and `/v0/deposit/submit` tx-hash
+  confirmation are implemented. Live Sepolia is not validated until evidence
+  includes public Sepolia tx hashes and final status responses.
 - Local Miden node: legacy fallback only, not the acceptance path
-- Full serialized E2E from the pivot run: `5 passed; 0 failed; finished in 822.50s`
+- Full serialized E2E from the Sepolia-readiness run: `5 passed; 0 failed; finished in 934.77s`
 - Builder sandbox smoke from this branch: inbound click/CLI flow, recipient
   claim, outbound funding, outbound public-note submit, and Anvil release all
   reached `SUCCESS`.
@@ -56,13 +60,29 @@ Important env:
 MIDEN_RPC_URL=https://rpc.testnet.miden.io
 MIDEN_MASTER_SEED_HEX=<unique 32-byte hex seed>
 MIDEN_REMOTE_PROVER_URL=        # optional override; native testnet defaults work
-MIDEN_REMOTE_PROVER_TIMEOUT_SECS=60
+MIDEN_REMOTE_PROVER_TIMEOUT_SECS=180
 BRIDGE_PROFILE=anvil
 BRIDGE_DEMO_ENABLED=1
 BRIDGE_PRICER=mock              # E2E harness only
+EVM_REQUIRED_CONFIRMATIONS=1
+EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS=
 ```
 
 The E2E harness now injects a unique `MIDEN_MASTER_SEED_HEX` per test and Compose forwards it into the bridge container. This matters on public testnet: reusing the default seed reused the same solver account and produced `incorrect account initial commitment` failures after the first run advanced that account on-chain.
+
+Sepolia profile:
+
+```bash
+cp .env.sepolia.example .env
+# Fill EVM_RPC_URL, MASTER_MNEMONIC, SOLVER_PRIVATE_KEY, and a fresh MIDEN_MASTER_SEED_HEX.
+make sepolia
+./bin/bridgectl quote inbound --asset eth --recipient <miden-address> --refund-to <sepolia-address>
+```
+
+In Sepolia mode, leave `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS` empty. The bridge
+waits for `/v0/deposit/submit`, then verifies the submitted tx hash pays the
+quoted deposit address and has the configured confirmation depth. This avoids
+RPC-heavy chain-history scans on public Sepolia.
 
 ## Builder Sandbox Smoke
 
@@ -132,7 +152,7 @@ sequenceDiagram
 Evidence from full suite:
 
 ```text
-E2E_EVIDENCE inbound correlation_id=862a5ab0-9634-4e8a-85f6-8c336983d55f evm_deposit_tx_hashes=["0xe95cb1ab8a3e329f37283de16fd6425a98a1a9ff38e7af1dab176678ad197aeb"] miden_mint_tx_ids=["0x73aa5dce46f60e4b267c69361eb459d64b93297110e7d73186c14a1dafa99ac2"] consumable_note_count=1
+E2E_EVIDENCE inbound correlation_id=3cbab06b-e388-46c2-a2eb-56e9c64ece10 evm_deposit_tx_hashes=["0x136cc1b31bba44984326d08940299c4d9788d5868f497e56d566735bedbc2fdd"] miden_mint_tx_ids=["0x07a9060a690f11da8f08fff2cf2af6666abc6a026f6be6c369ab9431c7f2a64e"] consumable_note_count=1
 ```
 
 ## Flow: Outbound Miden To EVM
@@ -159,7 +179,7 @@ sequenceDiagram
 Evidence from full suite:
 
 ```text
-E2E_EVIDENCE outbound funding_correlation_id=787bb932-965a-4f07-bca0-40474caabf6a outbound_correlation_id=3f5141a5-79b1-47fb-9225-c12bddc68b2b quote_hash=0xad4a14889b226f7de0cabff6371d7058606e03ca165b325cf9b5400c23741259 miden_consume_tx_ids=["0x65af9db10ea57f4c7934d024b6e5b8ccfc7881189a2f650b53eaff726360ea62"] evm_release_tx_hashes=["0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b"] balance_delta=1000000000000
+E2E_EVIDENCE outbound funding_correlation_id=1b3fa7ee-38e1-4e9f-9190-0ae8b24db149 outbound_correlation_id=9b642790-cb2e-4d30-bf76-a94d717dbb6f quote_hash=0x92fa8f84aac528651a0bf71d03c965a92132bad3c3e5e5636ff1945b065f9bb9 miden_consume_tx_ids=["0x52dc5f415da06b36e8f97b90f58a070e6b44e16e828659294bf8010040653c48"] evm_release_tx_hashes=["0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b"] balance_delta=1000000000000
 ```
 
 ## Flow: Incomplete Deposit
@@ -180,7 +200,7 @@ sequenceDiagram
 Evidence from full suite:
 
 ```text
-E2E_EVIDENCE incomplete correlation_id=c26ca708-2348-49e8-b3bd-ae36fc9838eb evm_deposit_tx_hashes=["0x63041961b5f9c066c2729db2556551cadb3f77491b8d4e3e54ce50434eb97daa"]
+E2E_EVIDENCE incomplete correlation_id=70ab6db7-ee8e-4bca-855e-3c2e3ba9d2fe evm_deposit_tx_hashes=["0x1e96fd26e0f3d6efc6175c8ada196889d3d903552f1e4d38471f713de9064b8a"]
 ```
 
 ## Flow: Refund On Slippage
@@ -202,7 +222,7 @@ sequenceDiagram
 Evidence from full suite:
 
 ```text
-E2E_EVIDENCE refund correlation_id=dd094af4-73f6-40c0-bb86-2eea34cc7d06 evm_deposit_tx_hashes=["0xb4beae8830c684109e22a9fc37d30ff2acad26806d412ec8275abaf2a81abdaf"] evm_refund_tx_hashes=["0xa435edec34875647ccecef0358a8a437a47173152fafcb9e07d3dd97cde802f4"]
+E2E_EVIDENCE refund correlation_id=0c2f9355-6cd4-4150-b6ce-fe2b50882b0a evm_deposit_tx_hashes=["0xf47218334b0d5908260f0dfc503256bc7a26d5d3efaa117e0ec29a7bfb5eaa20"] evm_refund_tx_hashes=["0xf49feffd1be5d7b9067e354e8c4e445426ed7702fff57af7d2173cdb78bf004c"]
 ```
 
 ## Flow: Restart/Resume
@@ -229,7 +249,7 @@ The important fix here: a Miden idempotency key without a durable tx id is treat
 Evidence from full suite:
 
 ```text
-E2E_EVIDENCE restart_resume correlation_id=482ee24d-9c04-4a0a-8cf0-11fa270aaeec evm_deposit_tx_hashes=["0x5c831f42cf38944fef3c5ca0b926218d1277257af4db8bf72a7dd5ce10f6e656"] miden_mint_tx_ids=["0x276c72b9ff2919a4e8072fe08828cd28e96aa2b1e64ffcda5a6ba551a5e92898"]
+E2E_EVIDENCE restart_resume correlation_id=46e070c8-f6a6-4298-b47a-df76a571604e evm_deposit_tx_hashes=["0xbad3d3f7c012e743bf98beaa64e83a24aa1a73028e34983148469ff33a632a26"] miden_mint_tx_ids=["0x1858d6d3d23d5eb60dee3863577a18c9067157eb6f1e4079864a01ad06eb292b"]
 ```
 
 ## Validation Commands
@@ -243,7 +263,7 @@ RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocaptur
 Result:
 
 ```text
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 822.50s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 934.77s
 ```
 
 Non-E2E regression:

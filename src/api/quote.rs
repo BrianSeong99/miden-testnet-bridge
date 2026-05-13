@@ -2,6 +2,8 @@ use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
 };
+use std::str::FromStr;
+
 use uuid::Uuid;
 
 use crate::{
@@ -11,6 +13,7 @@ use crate::{
         evm::evm_quote_requires_deposit_address,
         miden::{asset_symbol, miden_quote_requires_deposit_address, parse_account_id},
         miden_bridge_note::BridgeOutDepositMemo,
+        profile::{BridgeProfile, is_evm_asset_id, is_evm_native_asset},
     },
     now_iso8601,
     types::{DepositMode, Quote, QuoteRequest, QuoteResponse},
@@ -46,6 +49,9 @@ pub(crate) async fn create_quote(
 
     let correlation_id = Uuid::new_v4();
     let timestamp = now_iso8601();
+
+    validate_profile_asset(state, &request.origin_asset)?;
+    validate_profile_asset(state, &request.destination_asset)?;
 
     let origin_symbol = asset_symbol(&request.origin_asset)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -165,6 +171,36 @@ pub(crate) async fn create_quote(
     }
 
     Ok(response)
+}
+
+fn validate_profile_asset(state: &AppState, asset_id: &str) -> Result<(), ApiError> {
+    if !is_evm_asset_id(asset_id) {
+        return Ok(());
+    }
+
+    let profile = BridgeProfile::from_str(&state.runtime_profile)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if !profile.is_evm_asset_id(asset_id) {
+        return Err(ApiError::bad_request(format!(
+            "asset {asset_id} is not supported in {} profile",
+            profile.as_str()
+        )));
+    }
+
+    if profile == BridgeProfile::Sepolia
+        && !is_evm_native_asset(asset_id)
+        && state
+            .evm
+            .as_ref()
+            .and_then(|evm| evm.token_address(asset_id))
+            .is_none()
+    {
+        return Err(ApiError::bad_request(format!(
+            "asset {asset_id} requires an EVM token address in sepolia profile"
+        )));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -355,6 +391,51 @@ mod tests {
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn sepolia_profile_accepts_sepolia_eth_quote() {
+        let app = app(AppState::new(memory_state()).with_runtime_options(
+            false,
+            false,
+            "sepolia".to_owned(),
+        ));
+        let payload = with_override(
+            sample_quote_request(),
+            "originAsset",
+            Value::String("eth-sepolia:eth".to_owned()),
+        );
+        let response = app
+            .oneshot(
+                Request::post("/v0/quote")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn sepolia_profile_rejects_anvil_assets() {
+        let app = app(AppState::new(memory_state()).with_runtime_options(
+            false,
+            false,
+            "sepolia".to_owned(),
+        ));
+        let response = app
+            .oneshot(
+                Request::post("/v0/quote")
+                    .header("content-type", "application/json")
+                    .body(Body::from(sample_quote_request().to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
