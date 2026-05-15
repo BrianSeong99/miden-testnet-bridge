@@ -182,17 +182,18 @@
   <div class="page">
     <h1>Miden Testnet Bridge 1Click Mock Smoke Test Report</h1>
     <p class="muted">
-      Updated 2026-05-13 for branch <code>brian/sepolia-integration</code>.
-      Full E2E suite evidence was captured on 2026-05-13; clickable sandbox smoke
-      was captured on 2026-05-11.
+      Updated 2026-05-15 on <code>main</code>.
+      Full Anvil E2E suite evidence was captured on 2026-05-13; live Sepolia
+      native ETH evidence was captured on 2026-05-15.
     </p>
-    <div class="status">PASS: mock 1Click sandbox works on Anvil + Miden testnet</div>
+    <div class="status">PASS: mock 1Click works on Anvil + Miden testnet and live Sepolia native ETH</div>
 
     <p>
-      This report proves the current public-note bridge design against public Miden testnet and local Anvil.
+      This report proves the current public-note bridge design against public Miden testnet,
+      local Anvil, and live Sepolia native ETH.
       The repo is a mock NEAR Intents 1Click builder sandbox: apps should use
       the same quote, deposit, submit, and status shape they would use against a
-      hosted 1Click service. It does not claim Sepolia validation yet.
+      hosted 1Click service.
     </p>
 
     <table summary="Smoke test environment and result">
@@ -215,7 +216,7 @@
         </tr>
         <tr>
           <th>EVM network</th>
-          <td>Local Anvil. EVM tx hashes below are local-run artifacts, not public explorer links. Sepolia mode is wired but not live-validated.</td>
+          <td>Local Anvil for builder sandbox evidence. Sepolia native ETH live evidence used <code>https://gateway.tenderly.co/public/sepolia</code> on chain id <code>11155111</code>.</td>
         </tr>
         <tr>
           <th>Public report URL</th>
@@ -281,6 +282,72 @@
         </tr>
       </tbody>
     </table>
+
+    <h2>Live Sepolia Native ETH Evidence</h2>
+    <p>
+      This run used the Sepolia profile with demo endpoints disabled. The runner
+      drove the same mock 1Click <code>/v0/*</code> surface that third-party
+      builders integrate against.
+    </p>
+    <table class="evidence" summary="Live Sepolia native ETH evidence">
+      <thead>
+        <tr>
+          <th>Flow</th>
+          <th>Status</th>
+          <th>Evidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Runtime</td>
+          <td class="pass">PASS</td>
+          <td>
+            <code>/healthz = 200 ok</code><br>
+            <code>/readyz = 200 ready</code><br>
+            <code>runtimeProfile=sepolia</code><br>
+            <code>evmRpcUrl=https://gateway.tenderly.co/public/sepolia</code><br>
+            <code>evmChainId=11155111</code>
+          </td>
+        </tr>
+        <tr>
+          <td>Inbound: Sepolia ETH deposit to Miden public P2ID note, then recipient claim</td>
+          <td class="pass">PASS</td>
+          <td>
+            <code>correlation_id=3e5ec16b-2fa2-4c0a-8ce7-0ae8725bbac1</code><br>
+            <a href="https://sepolia.etherscan.io/tx/0xaca72ebac72cfbda3cd5957605b8e01f107c37acc9d2bfe118552b0c7cab311a"><code>evm_deposit_tx=0xaca72eba...7cab311a</code></a><br>
+            <a href="https://testnet.midenscan.com/tx/0x7a4c0ed23a0b13eb4f559ed2f9f82282b38b99dda2138a9b1e94759b3aefa0b6"><code>miden_mint_tx=0x7a4c0ed2...3aefa0b6</code></a><br>
+            <a href="https://testnet.midenscan.com/tx/0x6bf05ee2a2d9f772823abe66cf2417995ecaa71fdbe731b247694ec0f66eccfb"><code>claim_tx=0x6bf05ee2...f66eccfb</code></a><br>
+            <code>final_status=SUCCESS</code>
+          </td>
+        </tr>
+        <tr>
+          <td>Outbound funding: Sepolia ETH deposit to Miden sender</td>
+          <td class="pass">PASS</td>
+          <td>
+            <code>funding_correlation_id=8b1920ef-ca3b-4fbc-82c5-35f6f8670332</code><br>
+            <a href="https://sepolia.etherscan.io/tx/0x3c0e444fa726496ee09cda9c72d2d14d8a07235de81bdf8de94d0a559c899644"><code>funding_evm_deposit_tx=0x3c0e444f...9c899644</code></a><br>
+            <a href="https://testnet.midenscan.com/tx/0x2c40e3bfe9b988a30456d1bf4725617019ff43fe860dc1f6611b4a633561a65f"><code>funding_miden_mint_tx=0x2c40e3bf...3561a65f</code></a><br>
+            <a href="https://testnet.midenscan.com/tx/0xf74351101f1174831c1222a41823a6b9dd624cc3c6cb2f7cd8583090b933708d"><code>funding_claim_tx=0xf7435110...b933708d</code></a>
+          </td>
+        </tr>
+        <tr>
+          <td>Outbound: Miden BridgeOutV1 public note to Sepolia ETH release</td>
+          <td class="pass">PASS</td>
+          <td>
+            <code>outbound_correlation_id=ab2b3f5d-0d5e-4b86-a013-0f4ddcef05aa</code><br>
+            <code>quote_hash=0x437f319aab56abb302d6c0430ca4974f1b8836bd1b67a9dfeb017244730a19d9</code><br>
+            <a href="https://testnet.midenscan.com/tx/0xe9db64f8a00db3527ebb1f5d443c09ce2ec80c639ccabd7e5b4b6195ea045f2d"><code>bridge_out_note_tx=0xe9db64f8...ea045f2d</code></a><br>
+            <a href="https://testnet.midenscan.com/tx/0xbaa1789bb950b97bb8300aaebc53e817760f4791ce04b5d971b85f69e4577f81"><code>miden_consume_tx=0xbaa1789b...e4577f81</code></a><br>
+            <a href="https://sepolia.etherscan.io/tx/0x23640d4ad68277a065fa6ec70cc26b6bc7d2acf181bf0b6669da1b03fa668885"><code>evm_release_tx=0x23640d4a...fa668885</code></a><br>
+            <code>balance_delta_wei=1000000000000</code><br>
+            <code>final_status=SUCCESS</code>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>Reproduce the live Sepolia run:</p>
+    <pre>RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2&gt;&amp;1 | tee sepolia-e2e-live.log</pre>
 
     <h2>Flow Diagrams</h2>
     <p>
@@ -417,21 +484,29 @@
 
     <div class="note">
       <strong>Sepolia status:</strong>
-      <span class="pending">pending.</span>
-      This page validates Miden testnet plus Anvil only. Sepolia profile support is implemented for <code>eth-sepolia:eth</code> and tx-hash based deposit confirmation, but live Sepolia tx evidence is still required.
+      <span class="pass">validated for native ETH.</span>
+      ERC20 Sepolia assets still need token registry entries and live token-transfer evidence.
     </div>
 
-    <h2>Validated Command</h2>
+    <h2>Validated Commands</h2>
     <pre>RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocapture --test-threads=1
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 934.77s</pre>
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 934.77s
+
+RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2&gt;&amp;1 | tee sepolia-e2e-live.log
+
+SEPOLIA_E2E_EVIDENCE inbound ...
+SEPOLIA_E2E_EVIDENCE outbound ...</pre>
 
     <h2>Raw Evidence Lines</h2>
     <pre>E2E_EVIDENCE inbound correlation_id=3cbab06b-e388-46c2-a2eb-56e9c64ece10 evm_deposit_tx_hashes=["0x136cc1b31bba44984326d08940299c4d9788d5868f497e56d566735bedbc2fdd"] miden_mint_tx_ids=["0x07a9060a690f11da8f08fff2cf2af6666abc6a026f6be6c369ab9431c7f2a64e"] consumable_note_count=1
 E2E_EVIDENCE incomplete correlation_id=70ab6db7-ee8e-4bca-855e-3c2e3ba9d2fe evm_deposit_tx_hashes=["0x1e96fd26e0f3d6efc6175c8ada196889d3d903552f1e4d38471f713de9064b8a"]
 E2E_EVIDENCE outbound funding_correlation_id=1b3fa7ee-38e1-4e9f-9190-0ae8b24db149 outbound_correlation_id=9b642790-cb2e-4d30-bf76-a94d717dbb6f quote_hash=0x92fa8f84aac528651a0bf71d03c965a92132bad3c3e5e5636ff1945b065f9bb9 miden_consume_tx_ids=["0x52dc5f415da06b36e8f97b90f58a070e6b44e16e828659294bf8010040653c48"] evm_release_tx_hashes=["0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b"] balance_delta=1000000000000
 E2E_EVIDENCE refund correlation_id=0c2f9355-6cd4-4150-b6ce-fe2b50882b0a evm_deposit_tx_hashes=["0xf47218334b0d5908260f0dfc503256bc7a26d5d3efaa117e0ec29a7bfb5eaa20"] evm_refund_tx_hashes=["0xf49feffd1be5d7b9067e354e8c4e445426ed7702fff57af7d2173cdb78bf004c"]
-E2E_EVIDENCE restart_resume correlation_id=46e070c8-f6a6-4298-b47a-df76a571604e evm_deposit_tx_hashes=["0xbad3d3f7c012e743bf98beaa64e83a24aa1a73028e34983148469ff33a632a26"] miden_mint_tx_ids=["0x1858d6d3d23d5eb60dee3863577a18c9067157eb6f1e4079864a01ad06eb292b"]</pre>
+E2E_EVIDENCE restart_resume correlation_id=46e070c8-f6a6-4298-b47a-df76a571604e evm_deposit_tx_hashes=["0xbad3d3f7c012e743bf98beaa64e83a24aa1a73028e34983148469ff33a632a26"] miden_mint_tx_ids=["0x1858d6d3d23d5eb60dee3863577a18c9067157eb6f1e4079864a01ad06eb292b"]
+
+SEPOLIA_E2E_EVIDENCE inbound correlation_id=3e5ec16b-2fa2-4c0a-8ce7-0ae8725bbac1 evm_deposit_tx_hash=0xaca72ebac72cfbda3cd5957605b8e01f107c37acc9d2bfe118552b0c7cab311a miden_mint_tx_ids=["0x7a4c0ed23a0b13eb4f559ed2f9f82282b38b99dda2138a9b1e94759b3aefa0b6"] claim_tx_id=0x6bf05ee2a2d9f772823abe66cf2417995ecaa71fdbe731b247694ec0f66eccfb
+SEPOLIA_E2E_EVIDENCE outbound funding_correlation_id=8b1920ef-ca3b-4fbc-82c5-35f6f8670332 outbound_correlation_id=ab2b3f5d-0d5e-4b86-a013-0f4ddcef05aa funding_evm_deposit_tx_hash=0x3c0e444fa726496ee09cda9c72d2d14d8a07235de81bdf8de94d0a559c899644 bridge_out_note_tx_id=0xe9db64f8a00db3527ebb1f5d443c09ce2ec80c639ccabd7e5b4b6195ea045f2d miden_consume_tx_ids=["0xbaa1789bb950b97bb8300aaebc53e817760f4791ce04b5d971b85f69e4577f81"] evm_release_tx_hashes=["0x23640d4ad68277a065fa6ec70cc26b6bc7d2acf181bf0b6669da1b03fa668885"] balance_delta_wei=1000000000000</pre>
   </div>
   <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script type="text/javascript">
