@@ -1,6 +1,6 @@
 target/
 .env
+.live-sepolia-e2e/
 *.log
 .DS_Store
 node_modules/
-

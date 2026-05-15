@@ -1,21 +1,20 @@
 # E2E Handoff - Mock 1Click Anvil + Miden Testnet Sandbox
 
-Snapshot: 2026-05-13.
+Snapshot: 2026-05-15.
 
 ## Current Status
 
 - Repo: `BrianSeong99/miden-testnet-bridge`
-- Branch: `brian/sepolia-integration`
+- Branch: `main`
 - Product shape: mock NEAR Intents 1Click builder sandbox. Third-party apps
   should integrate against `/v0/tokens`, `/v0/quote`,
   `/v0/deposit/submit`, and `/v0/status`; `/demo/*` and `/lab` are local
   sandbox helpers only.
 - Accepted Miden path: public Miden testnet at `https://rpc.testnet.miden.io`
-- EVM path validated here: local Anvil
-- Sepolia readiness: profile-aware `eth-sepolia:*` assets, native ETH quote
+- EVM paths validated here: local Anvil and live Sepolia native ETH
+- Sepolia validation: profile-aware `eth-sepolia:*` assets, native ETH quote
   support, Sepolia-only Compose target, and `/v0/deposit/submit` tx-hash
-  confirmation are implemented. Live Sepolia is not validated until evidence
-  includes public Sepolia tx hashes and final status responses.
+  confirmation are implemented and live-validated for both directions.
 - Local Miden node: legacy fallback only, not the acceptance path
 - Full serialized E2E from the Sepolia-readiness run: `5 passed; 0 failed; finished in 934.77s`
 - Builder sandbox smoke from this branch: inbound click/CLI flow, recipient
@@ -83,6 +82,24 @@ In Sepolia mode, leave `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS` empty. The bridge
 waits for `/v0/deposit/submit`, then verifies the submitted tx hash pays the
 quoted deposit address and has the configured confirmation depth. This avoids
 RPC-heavy chain-history scans on public Sepolia.
+
+Live Sepolia E2E:
+
+```bash
+RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2>&1 | tee sepolia-e2e-live.log
+```
+
+The runner reads `.env`, uses the mock 1Click `/v0/*` endpoints, and does not
+print private keys. It needs a funded `SOLVER_PRIVATE_KEY`, funded
+`DEMO_EVM_FUNDED_PRIVATE_KEY`, Sepolia RPC URL, public Miden testnet RPC, and
+host access to the Compose Postgres port.
+
+Live Sepolia evidence from 2026-05-15:
+
+```text
+SEPOLIA_E2E_EVIDENCE inbound correlation_id=3e5ec16b-2fa2-4c0a-8ce7-0ae8725bbac1 evm_deposit_tx_hash=0xaca72ebac72cfbda3cd5957605b8e01f107c37acc9d2bfe118552b0c7cab311a miden_mint_tx_ids=["0x7a4c0ed23a0b13eb4f559ed2f9f82282b38b99dda2138a9b1e94759b3aefa0b6"] claim_tx_id=0x6bf05ee2a2d9f772823abe66cf2417995ecaa71fdbe731b247694ec0f66eccfb
+SEPOLIA_E2E_EVIDENCE outbound funding_correlation_id=8b1920ef-ca3b-4fbc-82c5-35f6f8670332 outbound_correlation_id=ab2b3f5d-0d5e-4b86-a013-0f4ddcef05aa funding_evm_deposit_tx_hash=0x3c0e444fa726496ee09cda9c72d2d14d8a07235de81bdf8de94d0a559c899644 bridge_out_note_tx_id=0xe9db64f8a00db3527ebb1f5d443c09ce2ec80c639ccabd7e5b4b6195ea045f2d miden_consume_tx_ids=["0xbaa1789bb950b97bb8300aaebc53e817760f4791ce04b5d971b85f69e4577f81"] evm_release_tx_hashes=["0x23640d4ad68277a065fa6ec70cc26b6bc7d2acf181bf0b6669da1b03fa668885"] balance_delta_wei=1000000000000
+```
 
 ## Builder Sandbox Smoke
 
@@ -313,18 +330,20 @@ Result: passed.
 
 ## Residual Risks
 
-- This proves Miden testnet + Anvil, not Sepolia. Sepolia still needs funded solver liquidity, RPC config, token registry, and live tx evidence.
+- Sepolia native ETH is validated, but ERC20 Sepolia assets still need token
+  registry entries and live token-transfer evidence.
 - `RUSTFLAGS='-C debug-assertions=no'` is still required for E2E. Keep this visible; do not hide it behind a green badge.
 - Bootstrapping every E2E test creates fresh public testnet accounts and faucets, so the suite is slow by design.
 - Public notes are intentionally discoverable. This matches Brian's production preference, but quote privacy is not the point of this v0.
 - The stable bridge account is v0. A later network-account consumer can replace it without changing the public-note deposit primitive.
+- Public Sepolia RPCs can rate-limit. The live runner backs off on RPC reads and
+  sends, but a dedicated RPC key is still better for repeated runs.
 
 ## Next Milestone
 
-`v0.3` is Sepolia validation:
+`v0.3` is Sepolia hardening:
 
-1. Configure Sepolia RPC, chain id, solver key, and test token registry.
-2. Fund the EVM solver/release side and verify balance deltas.
-3. Run inbound Sepolia -> Miden testnet.
-4. Run outbound Miden testnet public note -> Sepolia.
-5. Capture issue comments with quote payloads, tx ids, lifecycle rows, bridge logs, and final status responses.
+1. Add Sepolia ERC20 token registry entries and live ERC20 evidence.
+2. Move repeated runs to a dedicated Sepolia RPC key or paid endpoint.
+3. Keep publishing quote payloads, tx ids, lifecycle rows, bridge logs, and
+   final status responses for every acceptance run.

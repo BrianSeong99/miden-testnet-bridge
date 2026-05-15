@@ -61,10 +61,10 @@ integrations should use the `/v0/*` API.
 - Evidence logging: E2E runs print correlation ids, Miden tx ids, EVM tx hashes,
   and lifecycle evidence.
 
-This does not prove Sepolia yet. The Sepolia profile is wired for native ETH
-quotes and tx-hash based deposit confirmation, but live validation still
-requires a Sepolia RPC URL, funded solver key, funded test user, and explorer
-evidence for both directions.
+Sepolia native ETH is also live-validated for both directions. The 2026-05-15
+run used public Miden testnet plus Sepolia through
+`https://gateway.tenderly.co/public/sepolia`, with public Sepolia tx hashes and
+Miden tx ids recorded in `docs/smoke-test-report.html`.
 
 ## Bridge Shape
 
@@ -219,6 +219,31 @@ Native ETH is enabled by default as `eth-sepolia:eth`. ERC20 Sepolia assets are
 advertised only when `EVM_TOKEN_ADDRESSES_PATH` points at a JSON file with token
 addresses for `usdc`, `usdt`, or `btc`.
 
+Run the live Sepolia evidence path after the solver and test user keys are
+funded:
+
+```bash
+RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2>&1 | tee sepolia-e2e-live.log
+```
+
+The runner drives both directions through the mock 1Click `/v0/*` API:
+
+- Sepolia ETH deposit -> `/v0/deposit/submit` -> Miden public P2ID mint -> user
+  claim.
+- Sepolia ETH deposit to fund a Miden sender -> Miden public `BridgeOutV1` note
+  -> bridge consume -> Sepolia ETH release.
+
+It reads `.env`, never prints private keys, and defaults to
+`LIVE_E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/miden_bridge`
+for lifecycle evidence from the Compose Postgres port.
+
+Latest live evidence:
+
+```text
+SEPOLIA_E2E_EVIDENCE inbound correlation_id=3e5ec16b-2fa2-4c0a-8ce7-0ae8725bbac1 evm_deposit_tx_hash=0xaca72ebac72cfbda3cd5957605b8e01f107c37acc9d2bfe118552b0c7cab311a miden_mint_tx_ids=["0x7a4c0ed23a0b13eb4f559ed2f9f82282b38b99dda2138a9b1e94759b3aefa0b6"] claim_tx_id=0x6bf05ee2a2d9f772823abe66cf2417995ecaa71fdbe731b247694ec0f66eccfb
+SEPOLIA_E2E_EVIDENCE outbound funding_correlation_id=8b1920ef-ca3b-4fbc-82c5-35f6f8670332 outbound_correlation_id=ab2b3f5d-0d5e-4b86-a013-0f4ddcef05aa funding_evm_deposit_tx_hash=0x3c0e444fa726496ee09cda9c72d2d14d8a07235de81bdf8de94d0a559c899644 bridge_out_note_tx_id=0xe9db64f8a00db3527ebb1f5d443c09ce2ec80c639ccabd7e5b4b6195ea045f2d miden_consume_tx_ids=["0xbaa1789bb950b97bb8300aaebc53e817760f4791ce04b5d971b85f69e4577f81"] evm_release_tx_hashes=["0x23640d4ad68277a065fa6ec70cc26b6bc7d2acf181bf0b6669da1b03fa668885"] balance_delta_wei=1000000000000
+```
+
 ## Clickable Lab
 
 The lab UI is served by the bridge container:
@@ -352,7 +377,7 @@ flowchart TD
 | `MIDEN_REMOTE_PROVER_TIMEOUT_SECS` | No | `180` | Timeout for remote transaction prover requests. Public testnet proving can exceed the SDK's default 10 seconds during bootstrap. |
 | `MIDEN_MASTER_SEED_HEX` | Yes for reproducible public testnet runs | Compose fallback is a fixed test seed | 32-byte hex seed used to derive the deterministic Miden solver and faucet accounts. Use a fresh value for each public testnet run. |
 | `MIDEN_STORE_DIR` | Yes | `/var/lib/bridge/miden-store` in Compose, `./.miden-store` for host runs | Persistent SQLite store plus keystore for the Rust Miden client. |
-| `EVM_RPC_URL` | Yes | `http://anvil:8545` in Compose | EVM RPC endpoint. The validated E2E path uses local Anvil; Sepolia mode expects a Sepolia RPC URL. |
+| `EVM_RPC_URL` | Yes | `http://anvil:8545` in Compose | EVM RPC endpoint. The validated paths use local Anvil and Sepolia through `https://gateway.tenderly.co/public/sepolia`. |
 | `MASTER_MNEMONIC` | Yes | Anvil default mnemonic in Compose | Seed material for deterministic EVM quote wallet derivation. |
 | `SOLVER_PRIVATE_KEY` | Yes | Anvil default account key in Compose | Solver-side EVM key used for local Anvil release and refund transactions. |
 | `EVM_CHAIN_ID` | No | `271828` | Local Anvil chain id. |
@@ -360,7 +385,7 @@ flowchart TD
 | `EVM_REQUIRED_CONFIRMATIONS` | No | `1` for Anvil, `2` in `.env.sepolia.example` | Number of EVM confirmations required before deposit confirmation or solver release/refund completion. |
 | `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS` | No | Empty | Optional bounded scan window. Leave empty for Sepolia so deposits are confirmed through `/v0/deposit/submit` tx hashes instead of RPC-heavy history scans. |
 | `BRIDGE_HTTP_PORT` | No | `8080` | Host port exposed by the bridge service. |
-| `BRIDGE_PROFILE` | No | `anvil` | Runtime profile. `anvil` is the validated builder sandbox; `sepolia` enables `eth-sepolia:*` assets and tx-hash based deposit confirmation. |
+| `BRIDGE_PROFILE` | No | `anvil` | Runtime profile. `anvil` is the default builder sandbox; `sepolia` enables live Sepolia native ETH with tx-hash based deposit confirmation. |
 | `BRIDGE_DEMO_ENABLED` | No | `0` | Enables `/demo/*` orchestration endpoints. Set to `1` for the clickable sandbox. |
 | `BRIDGE_UI_ENABLED` | No | `1` | Documents whether `/lab` should be treated as enabled by clients. |
 | `BRIDGE_CORS_ALLOW_ORIGIN` | No | `*` | CORS allow-origin for third-party app builders testing from a browser. |
@@ -445,10 +470,11 @@ make e2e-local-node
 - Missing E2E tests: set `RUN_E2E=1`. The suite intentionally skips without it.
 - E2E debug assertion failures: keep `RUSTFLAGS='-C debug-assertions=no'` visible
   until the upstream Miden debug-assertion issue is removed from the path.
-- Sepolia claims: do not report Sepolia as validated unless the run includes live
-  Sepolia tx hashes, funded solver balances, and final status evidence.
+- Sepolia claims: report Sepolia as validated only when a run includes live
+  Sepolia tx hashes, funded solver balances, and final status evidence. The
+  2026-05-15 native ETH run satisfies that bar.
 
 ## More Detail
 
-See `docs/E2E_HANDOFF.md` for the implementation handoff, evidence ids, residual
-risks, and next Sepolia milestone.
+See `docs/E2E_HANDOFF.md` for the implementation handoff, evidence ids,
+residual risks, and Sepolia validation notes.
