@@ -370,21 +370,62 @@
     <div id="flow">
       <h2>End-to-End Flow</h2>
       <div class="diagram">
+        <h3>Component interaction model</h3>
+        <pre class="mermaid">flowchart LR
+    User["Builder app / user wallet"]
+    Sepolia["Sepolia native ETH"]
+    Miden["Miden public testnet"]
+    Postgres["Postgres quote state and tx artifacts"]
+
+    subgraph BridgeService["Mock 1Click Bridge service"]
+      API["Bridge API: /v0 quote, submit, status"]
+      Poller["Bridge poller: public note scanner"]
+      Lifecycle["Lifecycle engine: status and recovery"]
+      Solver["Solver role: Miden solver/bridge account + Sepolia solver EOA"]
+    end
+
+    User -->|"quote, submit tx hash, poll status"| API
+    API --> Postgres
+    Postgres --> API
+    Poller --> Postgres
+    Postgres --> Poller
+    Lifecycle --> Postgres
+    Postgres --> Lifecycle
+    API -->|"verify deposits"| Sepolia
+    Poller -->|"scan public BridgeOutV1 notes"| Miden
+    Lifecycle -->|"settlement decision"| Solver
+    Solver -->|"inbound: public P2ID mint"| Miden
+    Solver -->|"outbound: consume BridgeOutV1 note"| Miden
+    Solver -->|"outbound: release ETH"| Sepolia
+    User -->|"Sepolia deposits"| Sepolia
+    User -->|"Miden public notes and claims"| Miden</pre>
+      </div>
+
+      <p>
+        The solver is a separate role, not a separate process in this mock. The
+        bridge container owns the solver authority: the deterministic Miden
+        solver account, which also acts as the stable outbound bridge account,
+        and the Sepolia solver EOA used to release ETH. A production deployment
+        can split that role out, but the public 1Click API shape does not
+        change.
+      </p>
+
+      <div class="diagram">
         <h3>Sepolia native ETH both directions</h3>
         <pre class="mermaid">flowchart LR
     subgraph Inbound["Inbound: Sepolia to Miden"]
       I1["/v0/quote"] --> I2["User sends Sepolia ETH"]
       I2 --> I3["/v0/deposit/submit"]
       I3 --> I4["Bridge API verifies tx"]
-      I4 --> I5["Solver submits public P2ID mint"]
+      I4 --> I5["Solver role signs public P2ID mint"]
       I5 --> I6["Recipient claims on Miden"]
     end
 
     subgraph Outbound["Outbound: Miden to Sepolia"]
       O1["/v0/quote"] --> O2["User creates public BridgeOutV1 note"]
       O2 --> O3["Bridge poller validates note"]
-      O3 --> O4["Bridge account consumes note"]
-      O4 --> O5["Solver releases Sepolia ETH"]
+      O3 --> O4["Solver/bridge Miden account consumes note"]
+      O4 --> O5["Solver EOA releases Sepolia ETH"]
       O5 --> O6["/v0/status SUCCESS"]
     end</pre>
       </div>
@@ -493,6 +534,8 @@
         it requested a Miden-to-Sepolia quote, created a public programmable
         <code>BridgeOutV1</code> note from the user account, let the bridge
         account consume that note on Miden, and verified the Sepolia release.
+        In this mock, the bridge account returned in the quote is the same
+        deterministic Miden account used by the solver role.
       </p>
 
       <div class="steps">
@@ -571,19 +614,26 @@
         <h3>Inbound: Sepolia deposit to Miden claim</h3>
         <pre class="mermaid">sequenceDiagram
     participant User
-    participant Sepolia
     participant BridgeAPI as Bridge API
+    participant Postgres
+    participant Sepolia
+    participant Solver as Solver role
     participant Miden
     participant Recipient
 
     User->>BridgeAPI: POST /v0/quote eth-sepolia:eth to miden-testnet:eth
+    BridgeAPI->>Postgres: Persist quote and deposit address
     BridgeAPI-->>User: Return Sepolia deposit address
     User->>Sepolia: Send native ETH deposit
     User->>BridgeAPI: POST /v0/deposit/submit with txHash
     BridgeAPI->>Sepolia: Verify tx pays quoted deposit address
-    BridgeAPI->>BridgeAPI: PENDING_DEPOSIT to PROCESSING
-    BridgeAPI->>Miden: Submit solver-signed public P2ID mint
-    Miden-->>BridgeAPI: Mint tx committed
+    BridgeAPI->>Postgres: Record deposit tx and PROCESSING status
+    BridgeAPI->>Solver: Request Miden payout settlement
+    Solver->>Miden: Sign and submit public P2ID mint
+    Miden-->>Solver: Mint tx committed
+    Solver->>Postgres: Persist Miden mint tx id and SUCCESS
+    User->>BridgeAPI: GET /v0/status
+    BridgeAPI->>Postgres: Load final quote state
     BridgeAPI-->>User: /v0/status SUCCESS
     Recipient->>Miden: Consume public P2ID note
     Miden-->>Recipient: Wallet balance updated</pre>
@@ -594,19 +644,24 @@
         <pre class="mermaid">sequenceDiagram
     participant User
     participant BridgeAPI as Bridge API
+    participant Postgres
     participant Miden
     participant Poller as Bridge poller
+    participant Solver as Solver role
     participant Sepolia
 
     User->>BridgeAPI: POST /v0/quote miden-testnet:eth to eth-sepolia:eth
-    BridgeAPI-->>User: Return bridge account and BridgeOutV1 memo
-    User->>Miden: Create public BridgeOutV1 note
+    BridgeAPI->>Postgres: Persist quote, quote hash, recipient
+    BridgeAPI-->>User: Return solver/bridge Miden account and BridgeOutV1 memo
+    User->>Miden: Create public BridgeOutV1 note to bridge account
     Poller->>Miden: Sync and scan public notes
+    Poller->>Postgres: Load quote and expected memo fields
     Poller->>Poller: Validate quote hash, target account, faucet, amount
-    Poller->>Miden: Consume note with bridge account
-    Miden-->>Poller: Consume tx committed
-    Poller->>Sepolia: Release native ETH to recipient
-    Poller->>BridgeAPI: Persist tx ids and mark SUCCESS
+    Poller->>Solver: Request note consumption and Sepolia release
+    Solver->>Miden: Consume note with solver/bridge account
+    Miden-->>Solver: Consume tx committed
+    Solver->>Sepolia: Release native ETH to recipient
+    Solver->>Postgres: Persist consume tx, release tx, and SUCCESS
     User->>BridgeAPI: GET /v0/status
     BridgeAPI-->>User: SUCCESS with release tx hash</pre>
       </div>
