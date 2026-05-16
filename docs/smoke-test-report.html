@@ -371,34 +371,55 @@
       <h2>End-to-End Flow</h2>
       <div class="diagram">
         <h3>Component interaction model</h3>
-        <pre class="mermaid">flowchart LR
-    User["Builder app / user wallet"]
-    Sepolia["Sepolia native ETH"]
-    Miden["Miden public testnet"]
-    Postgres["Postgres quote state and tx artifacts"]
-
-    subgraph BridgeService["Mock 1Click Bridge service"]
-      API["Bridge API: /v0 quote, submit, status"]
-      Poller["Bridge poller: public note scanner"]
-      Lifecycle["Lifecycle engine: status and recovery"]
-      Solver["Solver role: Miden solver/bridge account + Sepolia solver EOA"]
+        <pre class="mermaid">flowchart TB
+    subgraph UserSide["Builder / user side"]
+      User["Builder app or user wallet"]
+      Recipient["Recipient Miden wallet"]
     end
 
-    User -->|"quote, submit tx hash, poll status"| API
+    subgraph BridgeRuntime["Mock 1Click Bridge service"]
+      API["Bridge API: tokens, quote, submit, status"]
+      Lifecycle["Lifecycle engine: status transitions and recovery"]
+      Poller["Bridge poller: public note scanner"]
+    end
+
+    subgraph SolverAuthority["Solver authority in this mock"]
+      MidenSolver["Miden solver account (also outbound bridge account)"]
+      SepoliaSolver["Sepolia solver EOA"]
+    end
+
+    subgraph DurableState["Durable state"]
+      Postgres["Postgres quote state and tx artifacts"]
+    end
+
+    subgraph SettlementNetworks["Settlement networks"]
+      Sepolia["Sepolia native ETH"]
+      Miden["Miden public testnet"]
+    end
+
+    User -->|"quote, submit deposit tx, poll status"| API
     API --> Postgres
     Postgres --> API
-    Poller --> Postgres
-    Postgres --> Poller
+    API -->|"verify submitted deposit tx"| Sepolia
+    API --> Lifecycle
+
     Lifecycle --> Postgres
     Postgres --> Lifecycle
-    API -->|"verify deposits"| Sepolia
+    Lifecycle -->|"inbound payout request"| MidenSolver
+
     Poller -->|"scan public BridgeOutV1 notes"| Miden
-    Lifecycle -->|"settlement decision"| Solver
-    Solver -->|"inbound: public P2ID mint"| Miden
-    Solver -->|"outbound: consume BridgeOutV1 note"| Miden
-    Solver -->|"outbound: release ETH"| Sepolia
-    User -->|"Sepolia deposits"| Sepolia
-    User -->|"Miden public notes and claims"| Miden</pre>
+    Poller --> Postgres
+    Postgres --> Poller
+    Poller -->|"validated outbound settlement"| MidenSolver
+
+    MidenSolver -->|"public P2ID mint"| Miden
+    MidenSolver -->|"consume BridgeOutV1 note"| Miden
+    MidenSolver -->|"release instruction"| SepoliaSolver
+    SepoliaSolver -->|"release ETH tx"| Sepolia
+
+    User -->|"Sepolia deposit"| Sepolia
+    User -->|"create BridgeOutV1 note"| Miden
+    Recipient -->|"claim public P2ID note"| Miden</pre>
       </div>
 
       <p>
