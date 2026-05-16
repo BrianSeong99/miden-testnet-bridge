@@ -15,6 +15,9 @@
 - Treat this repository as a mock NEAR Intents 1Click builder sandbox. The
   public integration surface should stay aligned with the 1Click flow:
   `/v0/tokens`, `/v0/quote`, optional `/v0/deposit/submit`, `/v0/status`.
+- Treat this as testnet-only infrastructure for local testing, Anvil, Sepolia,
+  and public Miden testnet. Do not present it as a production bridge, a mainnet
+  integration path, or something that should ever handle mainnet funds.
 - `/demo/*` and `/lab` are local sandbox helpers. Do not make third-party app
   integrations depend on demo-only endpoints.
 - Default to public Miden testnet at `https://rpc.testnet.miden.io` plus local
@@ -51,9 +54,9 @@
   - The bridge poller validates target account, quote hash, faucet, and amount.
   - The bridge poller consumes the note with the bridge account, then releases or
     refunds on the EVM side.
-- Public notes are intentional for production in this repo. Do not redesign back
-  to per-quote Miden deposit accounts unless the task explicitly changes the
-  product requirement.
+- Public notes are intentional for the bridge design being tested here. Do not
+  redesign back to per-quote Miden deposit accounts unless the task explicitly
+  changes the product requirement.
 
 ## Agent Runbook
 
@@ -67,6 +70,7 @@
 
    ```bash
    sed -n '1,340p' README.md
+   sed -n '1,260p' docs/builder-testing-guide.md
    sed -n '1,280p' docs/E2E_HANDOFF.md
    ```
 

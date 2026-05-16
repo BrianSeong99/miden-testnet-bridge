@@ -7,11 +7,19 @@ the NEAR Intents 1Click API, point their app at it, and test the same
 quote/deposit/status flow they would use against the hosted 1Click service. The
 default runnable profile is public Miden testnet plus local Anvil.
 
+This is testnet-only infrastructure for local testing, Anvil, Sepolia, and
+public Miden testnet. It is not a production bridge, not a mainnet integration
+path, and must not be used with mainnet funds.
+
 The validated path in this repo is public Miden testnet plus local Anvil. Local
 Miden node mode still exists as a manual fallback, but it is not the acceptance
 path for this bridge pivot.
 
 ## Builder Quick Start
+
+For a step-by-step testnet walkthrough aimed at third-party builders and
+automation agents, start with
+[`docs/builder-testing-guide.md`](docs/builder-testing-guide.md).
 
 ```bash
 git clone https://github.com/BrianSeong99/miden-testnet-bridge.git
