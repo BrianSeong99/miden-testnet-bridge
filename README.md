@@ -230,8 +230,9 @@ The runner drives both directions through the mock 1Click `/v0/*` API:
 
 - Sepolia ETH deposit -> `/v0/deposit/submit` -> Miden public P2ID mint -> user
   claim.
-- Sepolia ETH deposit to fund a Miden sender -> Miden public `BridgeOutV1` note
-  -> bridge consume -> Sepolia ETH release.
+- Sepolia ETH deposit to fund the user's Miden source account -> Miden public
+  `BridgeOutV1` note from that user account -> bridge consume -> Sepolia ETH
+  release.
 
 It reads `.env`, never prints private keys, and defaults to
 `LIVE_E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/miden_bridge`
