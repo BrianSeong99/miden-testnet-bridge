@@ -487,18 +487,20 @@
     <div id="outbound">
       <h2>Outbound: Miden Public Note To Sepolia ETH</h2>
       <p>
-        The runner first funded a Miden sender through the same Sepolia inbound
-        path. Then it requested a Miden-to-Sepolia quote, created a public
-        programmable <code>BridgeOutV1</code> note, let the bridge account
-        consume that note on Miden, and verified the Sepolia release.
+        The outbound actor is the user's Miden source account, not the solver.
+        The runner first funded that user account through the same Sepolia
+        inbound path so it had spendable Miden assets for the live test. Then
+        it requested a Miden-to-Sepolia quote, created a public programmable
+        <code>BridgeOutV1</code> note from the user account, let the bridge
+        account consume that note on Miden, and verified the Sepolia release.
       </p>
 
       <div class="steps">
         <div class="step">
           <div class="num">1</div>
           <div>
-            <h3>Miden sender funded from Sepolia</h3>
-            <p>The sender account needed spendable Miden funds before creating the outbound public note.</p>
+            <h3>Test setup: user Miden source account funded from Sepolia</h3>
+            <p>The user's Miden account needed spendable Miden funds before it could create the outbound public note.</p>
             <div class="links">
               <span><code>funding_correlation_id=8b1920ef-ca3b-4fbc-82c5-35f6f8670332</code></span>
               <a href="https://sepolia.etherscan.io/address/0x76677d79D0B697084FC6468d0A7783394F0550CD"><code>funding_deposit_address=0x76677d79D0B697084FC6468d0A7783394F0550CD</code></a>
@@ -516,8 +518,8 @@
             <p><code>POST /v0/quote miden-testnet:eth -> eth-sepolia:eth</code> returned the stable bridge account and <code>BridgeOutV1</code> memo.</p>
             <div class="links">
               <span><code>outbound_correlation_id=ab2b3f5d-0d5e-4b86-a013-0f4ddcef05aa</code></span>
-              <span><code>sender_account_id=0xe52d545e2a442a8040f329f7fb05e7</code></span>
-              <span><code>sender_address=mtst1arjj64z79fzz4qzq7v5l07c9uunvgtvt_qr7qqq9wr6w</code></span>
+              <span><code>user_miden_account_id=0xe52d545e2a442a8040f329f7fb05e7</code></span>
+              <span><code>user_miden_address=mtst1arjj64z79fzz4qzq7v5l07c9uunvgtvt_qr7qqq9wr6w</code></span>
               <span><code>bridge_account=mtst1arppx7qwcm64rqzm7p6vg6vwq5gqzyq5_qr7qqq9wr6w</code></span>
               <span><code>quote_hash=0x437f319aab56abb302d6c0430ca4974f1b8836bd1b67a9dfeb017244730a19d9</code></span>
             </div>
@@ -549,7 +551,7 @@
         <div class="step">
           <div class="num">5</div>
           <div>
-            <h3>Solver released Sepolia ETH to the user</h3>
+            <h3>Bridge released Sepolia ETH to the user</h3>
             <p>The test user Sepolia balance increased by exactly the quoted amount after the release transaction landed.</p>
             <div class="links">
               <a href="https://sepolia.etherscan.io/tx/0x23640d4ad68277a065fa6ec70cc26b6bc7d2acf181bf0b6669da1b03fa668885"><code>Etherscan release tx 0x23640d4a...fa668885</code></a>
