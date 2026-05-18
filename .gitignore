@@ -4,3 +4,6 @@ target/
 *.log
 .DS_Store
 node_modules/
+tools/walkthrough-video/out/
+tools/walkthrough-video/public/assets/
+tools/walkthrough-video/recordings/

@@ -16,6 +16,20 @@ The local Anvil profile still exists for offline UI demos and deterministic
 regression work, but it is documented separately at
 [`docs/anvil/local-sandbox.md`](docs/anvil/local-sandbox.md).
 
+## Terminal Walkthrough
+
+The video below walks through the Sepolia path step by step: quote request,
+native ETH deposit, tx-hash submit, bridge verification, Miden claim, and the
+outbound public `BridgeOutV1` note flow.
+
+[![Terminal walkthrough preview](docs/assets/miden-testnet-bridge-terminal-demo-poster.jpg)](docs/assets/miden-testnet-bridge-terminal-demo.mp4)
+
+Direct MP4:
+[`docs/assets/miden-testnet-bridge-terminal-demo.mp4`](docs/assets/miden-testnet-bridge-terminal-demo.mp4)
+
+The renderer lives in [`tools/walkthrough-video`](tools/walkthrough-video) and
+is opt-in. Normal bridge setup does not install the video dependencies.
+
 ## Builder Quick Start
 
 For the full step-by-step walkthrough, start with
