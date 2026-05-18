@@ -1,0 +1,25 @@
+{
+  "name": "miden-bridge-walkthrough-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "record": "node scripts/record.mjs",
+    "render": "remotion render src/index.ts TerminalWalkthrough out/miden-testnet-bridge-terminal-demo.mp4 --codec=h264 --crf=18",
+    "render:slides": "remotion render src/index.ts BridgeWalkthrough out/miden-testnet-bridge-sepolia-walkthrough.mp4 --codec=h264 --crf=18",
+    "render:terminal": "remotion render src/index.ts TerminalWalkthrough out/miden-testnet-bridge-terminal-demo.mp4 --codec=h264 --crf=18",
+    "preview": "remotion preview src/index.ts"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.368",
+    "playwright": "^1.56.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "remotion": "^4.0.368"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3"
+  }
+}
