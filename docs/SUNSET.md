@@ -1,6 +1,10 @@
 # SUNSET
 
-This bridge is temporary infrastructure with a known end date. It exists to unblock integration work until the real NEAR 1Click service is live, then consumers should move off of it during the W7 cutover window targeting 2026-06-12.
+This bridge is temporary testnet-only infrastructure with a known end date. It
+exists to unblock integration work on Sepolia and public Miden testnet until the
+real NEAR 1Click service is live, then consumers should move off of it during
+the W7 cutover window targeting 2026-06-12. Do not use this bridge with mainnet
+funds.
 
 ## Cutover
 

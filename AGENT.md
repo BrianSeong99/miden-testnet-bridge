@@ -4,8 +4,7 @@ This repository is a testnet-only mock NEAR Intents 1Click bridge for Sepolia
 and public Miden testnet. It is not a production bridge, not a mainnet
 integration path, and must not be used with mainnet funds.
 
-The canonical operating instructions are in `AGENTS.md`. Read them before
-changing behavior:
+Read these first:
 
 ```bash
 sed -n '1,220p' AGENTS.md

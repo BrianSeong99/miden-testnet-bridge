@@ -15,13 +15,15 @@
 - Treat this repository as a mock NEAR Intents 1Click builder sandbox. The
   public integration surface should stay aligned with the 1Click flow:
   `/v0/tokens`, `/v0/quote`, optional `/v0/deposit/submit`, `/v0/status`.
-- Treat this as testnet-only infrastructure for local testing, Anvil, Sepolia,
+- Treat this as testnet-only infrastructure for local testing, Sepolia, Anvil,
   and public Miden testnet. Do not present it as a production bridge, a mainnet
   integration path, or something that should ever handle mainnet funds.
 - `/demo/*` and `/lab` are local sandbox helpers. Do not make third-party app
   integrations depend on demo-only endpoints.
-- Default to public Miden testnet at `https://rpc.testnet.miden.io` plus local
-  Anvil.
+- Default all builder-facing docs and guides to public Miden testnet at
+  `https://rpc.testnet.miden.io` plus Sepolia native ETH.
+- Keep Anvil instructions in `docs/anvil/` or clearly labeled as local-only
+  fallback. `/demo/*` currently supports only `BRIDGE_PROFILE=anvil`.
 - Do not use the local Miden node for acceptance evidence. Local-node mode is a
   legacy/manual fallback only.
 - Use native `miden-client` network behavior for testnet and devnet. Do not
@@ -74,22 +76,26 @@
    sed -n '1,280p' docs/E2E_HANDOFF.md
    ```
 
-3. For the builder sandbox path, use:
+3. For the default Sepolia builder path, use:
 
    ```bash
-   cp .env.anvil.example .env
-   make sandbox
+   cp .env.sepolia.example .env
+   perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
+   # Fill EVM_RPC_URL, MASTER_MNEMONIC, funded SOLVER_PRIVATE_KEY,
+   # and funded DEMO_EVM_FUNDED_PRIVATE_KEY with testnet-only values.
+   make sepolia
    ./bin/bridgectl status
-   open http://localhost:8080/lab
+   ./bin/bridgectl tokens
    ```
 
 4. For a clean manual reproduction, use a fresh public-testnet seed:
 
    ```bash
-   test -f .env || cp .env.example .env
+   test -f .env || cp .env.sepolia.example .env
    perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
-   docker compose down --volumes --remove-orphans
-   docker compose up -d --build
+   # Fill Sepolia test keys and RPC before starting.
+   docker compose -f compose.sepolia.yaml --env-file .env down --volumes --remove-orphans
+   docker compose -f compose.sepolia.yaml --env-file .env up -d --build
    curl -i http://localhost:8080/healthz
    curl -i http://localhost:8080/readyz
    ```
@@ -101,33 +107,32 @@
    cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
    ```
 
-6. For full E2E evidence, run:
+6. For live Sepolia evidence, run:
 
    ```bash
-   RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocapture --test-threads=1 2>&1 | tee e2e.log
-   rg 'E2E_EVIDENCE|test result:' e2e.log
+   RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2>&1 | tee sepolia-e2e-live.log
+   rg 'SEPOLIA_E2E_EVIDENCE|evidence_report_path|final_status' sepolia-e2e-live.log
    ```
 
 7. When updating evidence, capture:
 
    - command line used
-   - final `test result` line
-   - each `E2E_EVIDENCE` line
+   - final command result and evidence report path
+   - each `SEPOLIA_E2E_EVIDENCE` line
    - Miden tx ids
    - EVM tx hashes
    - lifecycle status sequence
-   - whether the EVM side was Anvil or a public network
+   - whether the EVM side was Sepolia or an explicitly labeled local fallback
 
 8. Do not claim Sepolia validation unless the evidence includes live Sepolia tx
    hashes and final status responses for inbound and outbound flows.
 
-9. For Sepolia readiness smoke without claiming live validation:
+9. For Anvil-only local demo fallback:
 
    ```bash
-   cp .env.sepolia.example .env
-   # fill RPC, mnemonic, funded solver key, and a fresh MIDEN_MASTER_SEED_HEX
-   make sepolia
-   ./bin/bridgectl tokens
+   cp .env.anvil.example .env
+   make sandbox
+   open http://localhost:8080/lab
    ```
 
 ## Review Flow

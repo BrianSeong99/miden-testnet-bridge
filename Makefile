@@ -1,7 +1,7 @@
 .PHONY: genesis e2e e2e-local-node sandbox sandbox-down sandbox-reset sandbox-logs sandbox-status sepolia sepolia-down sepolia-reset sepolia-logs bridgectl
 
-# Local-node targets are legacy/manual only. The supported E2E path uses
-# public Miden testnet plus Anvil.
+# Local-node targets are legacy/manual only. The default documented builder
+# path uses public Miden testnet plus Sepolia native ETH.
 genesis:
 	docker compose --profile local-node up --build --abort-on-container-exit --exit-code-from miden-node-genesis miden-node-genesis
 
@@ -44,7 +44,7 @@ sepolia:
 		echo "Generated MIDEN_MASTER_SEED_HEX=$$seed"; \
 	fi
 	@if grep -Eq 'replace-with|sepolia.infura.io/v3/replace-me' .env; then \
-		echo "Fill Sepolia RPC, MASTER_MNEMONIC, and funded SOLVER_PRIVATE_KEY in .env before running make sepolia"; \
+		echo "Fill MASTER_MNEMONIC, funded SOLVER_PRIVATE_KEY, funded DEMO_EVM_FUNDED_PRIVATE_KEY, and MIDEN_MASTER_SEED_HEX in .env before running make sepolia"; \
 		exit 1; \
 	fi
 	docker compose -f compose.sepolia.yaml --env-file .env up -d --build --wait --wait-timeout 600

@@ -1,32 +1,32 @@
 # Builder Testing Guide
 
 > Testnet only: this repository is a mock NEAR Intents 1Click builder sandbox
-> for local testing, Anvil, Sepolia, and public Miden testnet. It is not a
-> production bridge, it is not a mainnet integration path, and it must not be
-> used with mainnet funds.
+> for Sepolia and public Miden testnet. It is not a production bridge, it is not
+> a mainnet integration path, and it must not be used with mainnet funds.
 
-This guide walks through using `miden-testnet-bridge` as a local mock of the
-NEAR Intents 1Click API for apps that want to test Miden bridge flows.
-
-The default path is:
+This guide walks through the default builder path for `miden-testnet-bridge`:
 
 ```text
-local Anvil EVM + public Miden testnet + mock 1Click Bridge API
+Sepolia native ETH + public Miden testnet + mock NEAR Intents 1Click API
 ```
 
-Use this when you want your app, script, or agent to exercise the same
-quote/deposit/status shape it will use against a hosted 1Click service, while
-settling test assets through public notes on Miden testnet.
+Use this path when you want an app, script, or agent to exercise the same
+quote/deposit/status shape it will use against a hosted 1Click service while
+producing public testnet evidence.
+
+The local Anvil sandbox still exists for offline UI demos and regression work,
+but it is not the default guide path. See
+[`docs/anvil/local-sandbox.md`](anvil/local-sandbox.md) for that profile.
 
 ## What You Will Run
 
 By the end of this guide you will have:
 
 1. A local Bridge API at `http://localhost:8080`.
-2. A local Anvil EVM chain with mock ETH and mock ERC20 assets.
+2. A Sepolia-native-ETH mock 1Click bridge profile.
 3. Public Miden testnet settlement through native `miden-client` behavior.
-4. A clickable lab at `http://localhost:8080/lab`.
-5. CLI commands for quotes, demo flows, status checks, logs, and reset.
+4. CLI commands for quotes, status checks, logs, and reset.
+5. A live evidence runner for Sepolia-to-Miden and Miden-to-Sepolia.
 6. The `/v0/*` endpoints your app should integrate with:
 
 ```text
@@ -36,24 +36,25 @@ POST /v0/deposit/submit
 GET  /v0/status
 ```
 
-The `/demo/*` endpoints and `/lab` page are local sandbox helpers. Use them to
-learn and smoke test the flow. Do not make a third-party app depend on them.
+`/demo/*` and the fully clickable `/lab` demo are Anvil-only local helpers in
+the current codebase. Do not make a third-party app depend on them.
 
 ## Mental Model
 
 The repo is a testnet-only mock NEAR Intents 1Click bridge, not the real NEAR
 solver network. The public API shape is intentionally 1Click-like, while the
-settlement logic is specialized for Anvil, Sepolia, and Miden testnet.
+settlement logic is specialized for Sepolia native ETH and Miden testnet.
 
 ```mermaid
 flowchart TB
     subgraph App["Builder app"]
       UI["User interface or agent"]
-      Wallets["EVM wallet + Miden wallet"]
+      Wallets["Sepolia wallet + Miden wallet"]
     end
 
     subgraph Bridge["Mock 1Click Bridge service"]
       API["/v0 API"]
+      Submit["/v0/deposit/submit"]
       Poller["Miden public-note poller"]
       State["Lifecycle and recovery"]
       Solver["Solver role"]
@@ -63,41 +64,43 @@ flowchart TB
       Postgres["Postgres"]
     end
 
-    subgraph Networks["Settlement networks"]
-      Anvil["Anvil or Sepolia"]
+    subgraph Networks["Public testnets"]
+      Sepolia["Sepolia native ETH"]
       Miden["Miden testnet"]
     end
 
-    UI -->|"tokens, quote, submit, status"| API
-    Wallets -->|"EVM deposits"| Anvil
+    UI -->|"tokens, quote, status"| API
+    UI -->|"submit Sepolia tx hash"| Submit
+    Wallets -->|"Sepolia deposits"| Sepolia
     Wallets -->|"Miden notes and claims"| Miden
     API --> State
+    Submit --> State
     State --> Postgres
     Poller --> Postgres
     Poller -->|"scan BridgeOutV1 notes"| Miden
     Solver -->|"P2ID mint or note consume"| Miden
-    Solver -->|"EVM release or refund"| Anvil
+    Solver -->|"Sepolia release or refund"| Sepolia
 ```
 
-Inbound means EVM to Miden:
+Inbound means Sepolia to Miden:
 
 1. Your app asks the Bridge API for a quote.
-2. The user sends EVM funds to the returned deposit address.
-3. The bridge detects or verifies the deposit.
-4. The solver role creates a public Miden P2ID payout note.
+2. The user sends Sepolia ETH to the returned deposit address.
+3. Your app submits the landed Sepolia tx hash to `/v0/deposit/submit`.
+4. The bridge verifies that tx and creates a public Miden P2ID payout note.
 5. The recipient Miden wallet consumes that note.
 
-Outbound means Miden to EVM:
+Outbound means Miden to Sepolia:
 
 1. Your app asks the Bridge API for a quote.
 2. The Bridge API returns a stable Miden bridge account and `BridgeOutV1` memo.
 3. The user creates a public Miden note targeted to that bridge account.
 4. The bridge poller validates and consumes the note.
-5. The solver role releases EVM funds to the destination recipient.
+5. The solver role releases Sepolia ETH to the destination recipient.
 
 In this mock, the solver role runs inside the bridge service. It owns the Miden
-solver account and the EVM solver key. Treat it as a role boundary even though
-it is not a separate process here.
+solver account and the Sepolia solver key. Treat it as a role boundary even
+though it is not a separate process here.
 
 ## Prerequisites
 
@@ -109,11 +112,16 @@ Install these on the host:
 - `curl`.
 - `jq`, optional but useful for inspecting JSON.
 - Network access to `https://rpc.testnet.miden.io`.
+- A Sepolia RPC endpoint. The public Tenderly endpoint works for basic testing:
+  `https://gateway.tenderly.co/public/sepolia`.
+- Sepolia ETH for two test-only addresses:
+  - `SOLVER_PRIVATE_KEY`: pays releases and gas.
+  - `DEMO_EVM_FUNDED_PRIVATE_KEY`: sends deposits for the evidence runner.
 
 You do not need to run a local Miden node. The supported path uses public Miden
 testnet and the native Miden remote prover configuration.
 
-## Tutorial 1: Start The Local Builder Sandbox
+## Tutorial 1: Start The Sepolia Builder Profile
 
 Clone the repo:
 
@@ -122,34 +130,52 @@ git clone https://github.com/BrianSeong99/miden-testnet-bridge.git
 cd miden-testnet-bridge
 ```
 
-Create the Anvil sandbox environment:
+Create the Sepolia environment file:
 
 ```bash
-cp .env.anvil.example .env
+cp .env.sepolia.example .env
 ```
+
+Fill these values in `.env`:
+
+```text
+EVM_RPC_URL=https://gateway.tenderly.co/public/sepolia
+MASTER_MNEMONIC=<builder-controlled-test-mnemonic>
+SOLVER_PRIVATE_KEY=<funded-sepolia-solver-private-key>
+DEMO_EVM_FUNDED_PRIVATE_KEY=<funded-sepolia-test-user-private-key>
+MIDEN_MASTER_SEED_HEX=<fresh-32-byte-hex-seed>
+```
+
+Generate the Miden seed with:
+
+```bash
+perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
+```
+
+Rules for these values:
+
+- Use test keys only. Never paste mainnet keys into this repo.
+- Fund both Sepolia keys before running live evidence.
+- `MASTER_MNEMONIC` is used to derive quote deposit addresses. It does not need
+  funds, but it must be controlled by the builder.
+- Use a fresh `MIDEN_MASTER_SEED_HEX` for each clean public Miden testnet run.
+- Leave `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS=` empty in Sepolia mode.
 
 Start the stack:
 
 ```bash
-make sandbox
+make sepolia
 ```
-
-`make sandbox` does three things:
-
-1. Generates a fresh `MIDEN_MASTER_SEED_HEX` if `.env` still has the placeholder.
-2. Starts `bridge`, `postgres`, `anvil`, and `anvil-init`.
-3. Waits for health checks before printing the local URLs.
 
 Expected output shape:
 
 ```text
 Bridge API: http://localhost:8080
-Lab UI:     http://localhost:8080/lab
-CLI:        ./bin/bridgectl status
+Status:     ./bin/bridgectl status
 ```
 
 Bootstrap can take a few minutes because the bridge deploys and funds Miden
-testnet accounts. Wait for `make sandbox` to finish before testing.
+testnet accounts. Wait for `make sepolia` to finish before testing.
 
 ## Tutorial 2: Check The Service
 
@@ -172,18 +198,18 @@ Inspect the mock 1Click token list:
 curl -s http://localhost:8080/v0/tokens | jq .
 ```
 
-The Anvil profile advertises assets with these prefixes:
+The Sepolia profile advertises native ETH plus Miden testnet assets:
 
 ```text
-eth-anvil:eth
-eth-anvil:usdc
-eth-anvil:usdt
-eth-anvil:btc
+eth-sepolia:eth
 miden-testnet:eth
 miden-testnet:usdc
 miden-testnet:usdt
 miden-testnet:btc
 ```
+
+Sepolia ERC20 assets are advertised only when `EVM_TOKEN_ADDRESSES_PATH` points
+at a token-address JSON file with `usdc`, `usdt`, or `btc` addresses.
 
 Check the same state through the local CLI:
 
@@ -192,83 +218,7 @@ Check the same state through the local CLI:
 ./bin/bridgectl tokens
 ```
 
-## Tutorial 3: Use The Clickable Lab
-
-Open:
-
-```text
-http://localhost:8080/lab
-```
-
-Use the lab to click through both directions:
-
-- Anvil -> Miden: quote, EVM deposit, public P2ID mint, recipient claim.
-- Miden -> Anvil: fund user Miden account, create public `BridgeOutV1` note,
-  bridge consume, EVM release.
-
-The lab calls `/demo/*` helper endpoints because a browser cannot safely sign
-all EVM and Miden transactions itself. It is for learning and local smoke
-testing. Your app should use `/v0/*`.
-
-## Tutorial 4: Run The Same Flows From The CLI
-
-Start an inbound demo flow:
-
-```bash
-./bin/bridgectl demo inbound --asset eth --amount 1000000000000
-```
-
-The response includes:
-
-- `correlationId`
-- `recipientAccountId`
-- an Anvil deposit tx hash
-- a Miden mint tx id after settlement
-- `status`
-
-If the response gives you a `recipientAccountId`, claim the public P2ID note:
-
-```bash
-./bin/bridgectl demo claim <recipient-account-id>
-```
-
-Start the outbound setup step. This funds a user Miden account so it can create
-the outbound note:
-
-```bash
-./bin/bridgectl demo outbound-fund --asset eth --amount 1000000000000
-```
-
-Then submit the outbound public Miden note from that user account:
-
-```bash
-./bin/bridgectl demo outbound-submit <sender-account-id> --asset eth --amount 1000000000000
-```
-
-Inspect all demo flows:
-
-```bash
-./bin/bridgectl flows
-./bin/bridgectl flow <correlation-id>
-```
-
-Tail bridge logs:
-
-```bash
-make sandbox-logs
-```
-
-Reset local state:
-
-```bash
-make sandbox-reset
-```
-
-Use reset when you want a clean Postgres database, clean Anvil state, and clean
-Miden client store. A clean public Miden run should also use a fresh
-`MIDEN_MASTER_SEED_HEX`.
-
-## Tutorial 5: Integrate Your App Against `/v0/*`
+## Tutorial 3: Integrate Your App Against `/v0/*`
 
 Set your app's bridge base URL to:
 
@@ -276,7 +226,7 @@ Set your app's bridge base URL to:
 http://localhost:8080
 ```
 
-Do not use `/demo/*` from application code. Use only:
+Use only:
 
 ```text
 GET  /v0/tokens
@@ -293,14 +243,14 @@ curl -s http://localhost:8080/v0/tokens | jq .
 
 Use the returned `assetId` values in quote requests.
 
-### Request an inbound quote: EVM to Miden
+### Request an inbound quote: Sepolia to Miden
 
-Use this when the user starts with EVM funds and wants a Miden payout.
+Use this when the user starts with Sepolia ETH and wants a Miden payout.
 
 Replace:
 
 - `<miden-recipient-address>` with a valid Miden account address from your app.
-- `<evm-refund-address>` with the user's EVM refund address.
+- `<sepolia-refund-address>` with the user's Sepolia refund address.
 
 ```bash
 curl -s http://localhost:8080/v0/quote \
@@ -310,11 +260,11 @@ curl -s http://localhost:8080/v0/quote \
     "depositMode": "SIMPLE",
     "swapType": "EXACT_INPUT",
     "slippageTolerance": 100.0,
-    "originAsset": "eth-anvil:eth",
+    "originAsset": "eth-sepolia:eth",
     "depositType": "ORIGIN_CHAIN",
     "destinationAsset": "miden-testnet:eth",
     "amount": "1000000000000",
-    "refundTo": "<evm-refund-address>",
+    "refundTo": "<sepolia-refund-address>",
     "refundType": "ORIGIN_CHAIN",
     "recipient": "<miden-recipient-address>",
     "recipientType": "DESTINATION_CHAIN",
@@ -322,7 +272,7 @@ curl -s http://localhost:8080/v0/quote \
   }' | jq .
 ```
 
-Save these fields from the response:
+Save these fields:
 
 ```text
 correlationId
@@ -331,9 +281,14 @@ quote.amountIn
 quote.amountOut
 ```
 
-Your app must send the EVM deposit to `quote.depositAddress`. In the Anvil
-profile, the bridge scans Anvil and detects deposits. In the Sepolia profile,
-submit the transaction hash through `/v0/deposit/submit` after the tx lands.
+Your app must send Sepolia ETH to `quote.depositAddress`. After the transaction
+lands, submit the tx hash:
+
+```bash
+curl -s http://localhost:8080/v0/deposit/submit \
+  -H 'content-type: application/json' \
+  -d '{"txHash":"0x...","depositAddress":"<deposit-address>"}' | jq .
+```
 
 Poll status by deposit address:
 
@@ -341,25 +296,17 @@ Poll status by deposit address:
 curl -s "http://localhost:8080/v0/status?depositAddress=<deposit-address>" | jq .
 ```
 
-Terminal statuses are:
-
-```text
-SUCCESS
-REFUNDED
-FAILED
-```
-
 For inbound Miden payouts, `SUCCESS` means the public P2ID payout note is
 committed and consumable. The recipient wallet still needs to sync and consume
 that note to update its local balance.
 
-### Request an outbound quote: Miden to EVM
+### Request an outbound quote: Miden to Sepolia
 
-Use this when the user starts with Miden funds and wants an EVM payout.
+Use this when the user starts with Miden funds and wants a Sepolia ETH payout.
 
 Replace:
 
-- `<evm-recipient-address>` with the destination EVM address.
+- `<sepolia-recipient-address>` with the destination Sepolia address.
 - `<miden-refund-address>` with the user's Miden refund address.
 
 ```bash
@@ -372,11 +319,11 @@ curl -s http://localhost:8080/v0/quote \
     "slippageTolerance": 100.0,
     "originAsset": "miden-testnet:eth",
     "depositType": "ORIGIN_CHAIN",
-    "destinationAsset": "eth-anvil:eth",
+    "destinationAsset": "eth-sepolia:eth",
     "amount": "1000000000000",
     "refundTo": "<miden-refund-address>",
     "refundType": "ORIGIN_CHAIN",
-    "recipient": "<evm-recipient-address>",
+    "recipient": "<sepolia-recipient-address>",
     "recipientType": "DESTINATION_CHAIN",
     "deadline": "2027-01-01T00:00:00Z"
   }' | jq .
@@ -396,13 +343,13 @@ For outbound Miden deposits:
 - `quote.depositMemo` is a `BridgeOutV1` instruction payload.
 - The user creates a public Miden note carrying the quoted asset and memo.
 - The bridge poller scans public notes, validates the memo, consumes the note
-  with the bridge account, and releases EVM funds.
+  with the bridge account, and releases Sepolia ETH.
 
 Reference implementations in this repo:
 
 - `src/bin/sepolia_e2e.rs` for a full `/v0/*` Sepolia native ETH run.
-- `src/api/demo.rs` for local demo helper flows.
 - `src/chains/miden_bridge_note.rs` for `BridgeOutV1` memo encoding.
+- `docs/smoke-test-report.html` for a recorded Sepolia evidence report.
 
 Poll status with both deposit fields:
 
@@ -412,47 +359,15 @@ curl -G http://localhost:8080/v0/status \
   --data-urlencode "depositMemo=<deposit-memo>" | jq .
 ```
 
-## Tutorial 6: Run Live Sepolia Native ETH
-
-Use Sepolia only when you need public Etherscan evidence or want to test against
-a public EVM testnet. The local Anvil sandbox is the normal builder path.
-
-Create the Sepolia env file:
-
-```bash
-cp .env.sepolia.example .env
-```
-
-Fill:
+Terminal statuses are:
 
 ```text
-EVM_RPC_URL
-MASTER_MNEMONIC
-SOLVER_PRIVATE_KEY
-DEMO_EVM_FUNDED_PRIVATE_KEY
-MIDEN_MASTER_SEED_HEX
+SUCCESS
+REFUNDED
+FAILED
 ```
 
-Notes:
-
-- `SOLVER_PRIVATE_KEY` must have enough Sepolia ETH to pay releases and gas.
-- `DEMO_EVM_FUNDED_PRIVATE_KEY` is only needed for the live evidence runner or
-  demo-style sender behavior.
-- Use a fresh 32-byte `MIDEN_MASTER_SEED_HEX` for each clean public testnet run.
-- Leave `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS=` empty in Sepolia mode.
-
-Start Sepolia mode:
-
-```bash
-make sepolia
-```
-
-Check:
-
-```bash
-./bin/bridgectl status
-./bin/bridgectl tokens
-```
+## Tutorial 4: Run Live Sepolia Evidence
 
 Run the live Sepolia native ETH evidence runner:
 
@@ -477,51 +392,55 @@ https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html
 
 ## Agent Runbook
 
-Use this checklist when another agent or script needs to reproduce the sandbox.
+Use this checklist when another agent or script needs to reproduce the Sepolia
+profile.
 
 1. Start clean:
 
 ```bash
 git status --short --branch
-cp .env.anvil.example .env
-make sandbox-reset || true
-make sandbox
+cp .env.sepolia.example .env
+perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
 ```
 
-2. Verify health:
+2. Fill `.env`:
+
+```text
+EVM_RPC_URL=https://gateway.tenderly.co/public/sepolia
+MASTER_MNEMONIC=<builder-controlled-test-mnemonic>
+SOLVER_PRIVATE_KEY=<funded-sepolia-solver-private-key>
+DEMO_EVM_FUNDED_PRIVATE_KEY=<funded-sepolia-test-user-private-key>
+```
+
+3. Start and verify:
 
 ```bash
+make sepolia
 curl -i http://localhost:8080/healthz
 curl -i http://localhost:8080/readyz
 ./bin/bridgectl status
+./bin/bridgectl tokens
 ```
 
-3. Smoke test one click path:
+4. Capture live evidence:
 
 ```bash
-./bin/bridgectl demo inbound --asset eth --amount 1000000000000
-./bin/bridgectl flows
-```
-
-4. Capture evidence:
-
-```bash
-./bin/bridgectl flow <correlation-id>
-docker compose --env-file .env logs bridge --tail=300
+RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2>&1 | tee sepolia-e2e-live.log
+rg 'SEPOLIA_E2E_EVIDENCE|evidence_report_path|final_status' sepolia-e2e-live.log
+docker compose -f compose.sepolia.yaml --env-file .env logs bridge --tail=300
 ```
 
 5. Reset after the run:
 
 ```bash
-make sandbox-reset
+make sepolia-reset
 ```
 
-For full regression evidence:
+For non-E2E regression coverage:
 
 ```bash
 cargo fmt --check
 cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
-RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocapture --test-threads=1
 ```
 
 Do not claim Sepolia validation unless the evidence includes live Sepolia tx
@@ -529,13 +448,19 @@ hashes and final `SUCCESS` statuses for both directions.
 
 ## Troubleshooting
 
+### `make sepolia` refuses to start
+
+The target stops when placeholders are still present. Fill `.env` values for
+Sepolia RPC, mnemonic, funded solver key, funded test-user key, and fresh Miden
+seed.
+
 ### `readyz` returns `503`
 
 The bridge may still be bootstrapping Miden testnet accounts or waiting on RPC
 lag. Give it the full Compose startup window, then check logs:
 
 ```bash
-make sandbox-logs
+make sepolia-logs
 ```
 
 ### `incorrect account initial commitment`
@@ -544,10 +469,11 @@ You reused a Miden seed after the deterministic solver account advanced on
 public testnet. Reset local state and use a fresh seed:
 
 ```bash
-make sandbox-reset
-cp .env.anvil.example .env
+make sepolia-reset
+cp .env.sepolia.example .env
 perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
-make sandbox
+# refill Sepolia keys and RPC
+make sepolia
 ```
 
 ### Sepolia deposits do not move
@@ -561,6 +487,12 @@ curl -s http://localhost:8080/v0/deposit/submit \
   -d '{"txHash":"0x...","depositAddress":"0x..."}' | jq .
 ```
 
+Check:
+
+```bash
+docker compose -f compose.sepolia.yaml --env-file .env logs bridge --tail=300 | rg "deposit|EVM|sepolia|reverted|does not pay"
+```
+
 ### Outbound quote succeeds but nothing releases
 
 Check that the user created a public Miden `BridgeOutV1` note using exactly the
@@ -570,7 +502,7 @@ Then inspect:
 
 ```bash
 ./bin/bridgectl flows
-make sandbox-logs
+make sepolia-logs
 ```
 
 ### Browser app cannot call the bridge
@@ -586,7 +518,10 @@ For tighter local testing, replace `*` with your app origin.
 ## Where To Look Next
 
 - `README.md`: quick start, environment reference, evidence commands.
-- `docs/E2E_HANDOFF.md`: implementation status, evidence ids, design decisions.
+- `AGENTS.md`: canonical repo operating instructions for agents.
+- `AGENT.md`: compatibility startup guide for agents that look for singular
+  filenames.
 - `docs/RUNBOOK.md`: operator recovery procedures.
+- `docs/anvil/local-sandbox.md`: local Anvil-only demo profile.
 - `docs/smoke-test-report.html`: published Sepolia evidence page.
 - `docs/openapi.yaml`: 1Click-shaped API schema vendored for this mock.

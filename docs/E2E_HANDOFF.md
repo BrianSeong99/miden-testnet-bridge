@@ -1,6 +1,11 @@
-# E2E Handoff - Mock 1Click Anvil + Miden Testnet Sandbox
+# E2E Handoff - Mock 1Click Sepolia + Miden Testnet Sandbox
 
 Snapshot: 2026-05-15.
+
+This handoff includes historical Anvil evidence because the local demo profile
+was built first. Builder-facing documentation now defaults to Sepolia native ETH
+plus public Miden testnet. Treat Anvil sections in this file as local fallback
+context only; the current tutorial is [`builder-testing-guide.md`](./builder-testing-guide.md).
 
 ## Current Status
 
@@ -11,14 +16,16 @@ Snapshot: 2026-05-15.
   `/v0/deposit/submit`, and `/v0/status`; `/demo/*` and `/lab` are local
   sandbox helpers only.
 - Accepted Miden path: public Miden testnet at `https://rpc.testnet.miden.io`
-- EVM paths validated here: local Anvil and live Sepolia native ETH
+- Default EVM path: live Sepolia native ETH
+- Local fallback EVM path: Anvil, documented under `docs/anvil/`
 - Sepolia validation: profile-aware `eth-sepolia:*` assets, native ETH quote
   support, Sepolia-only Compose target, and `/v0/deposit/submit` tx-hash
   confirmation are implemented and live-validated for both directions.
 - Local Miden node: legacy fallback only, not the acceptance path
-- Full serialized E2E from the Sepolia-readiness run: `5 passed; 0 failed; finished in 934.77s`
-- Builder sandbox smoke from this branch: inbound click/CLI flow, recipient
-  claim, outbound funding, outbound public-note submit, and Anvil release all
+- Full serialized Anvil regression E2E from the Sepolia-readiness run:
+  `5 passed; 0 failed; finished in 934.77s`
+- Local Anvil sandbox smoke from this branch: inbound click/CLI flow, recipient
+  claim, outbound funding, outbound public-note submit, and local release all
   reached `SUCCESS`.
 - Non-E2E regression set: green for `lib`, `evm`, `hardening`, `lifecycle`, `miden_bridge`, `miden_node`, `state`
 - Static evidence page: [`docs/smoke-test-report.html`](./smoke-test-report.html)
@@ -44,7 +51,15 @@ Design rules we are following:
 
 ## Runtime Shape
 
-Default Compose now runs:
+Default builder profile:
+
+- `compose.sepolia.yaml`
+- `bridge`
+- `postgres`
+- public Sepolia native ETH through `EVM_RPC_URL`
+- public Miden testnet through `MIDEN_RPC_URL`
+
+Local Anvil fallback Compose runs:
 
 - `bridge`
 - `postgres`
@@ -60,10 +75,10 @@ MIDEN_RPC_URL=https://rpc.testnet.miden.io
 MIDEN_MASTER_SEED_HEX=<unique 32-byte hex seed>
 MIDEN_REMOTE_PROVER_URL=        # optional override; native testnet defaults work
 MIDEN_REMOTE_PROVER_TIMEOUT_SECS=180
-BRIDGE_PROFILE=anvil
-BRIDGE_DEMO_ENABLED=1
+BRIDGE_PROFILE=sepolia
+BRIDGE_DEMO_ENABLED=0
 BRIDGE_PRICER=mock              # E2E harness only
-EVM_REQUIRED_CONFIRMATIONS=1
+EVM_REQUIRED_CONFIRMATIONS=2
 EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS=
 ```
 
@@ -101,7 +116,7 @@ SEPOLIA_E2E_EVIDENCE inbound correlation_id=3e5ec16b-2fa2-4c0a-8ce7-0ae8725bbac1
 SEPOLIA_E2E_EVIDENCE outbound funding_correlation_id=8b1920ef-ca3b-4fbc-82c5-35f6f8670332 outbound_correlation_id=ab2b3f5d-0d5e-4b86-a013-0f4ddcef05aa funding_evm_deposit_tx_hash=0x3c0e444fa726496ee09cda9c72d2d14d8a07235de81bdf8de94d0a559c899644 bridge_out_note_tx_id=0xe9db64f8a00db3527ebb1f5d443c09ce2ec80c639ccabd7e5b4b6195ea045f2d miden_consume_tx_ids=["0xbaa1789bb950b97bb8300aaebc53e817760f4791ce04b5d971b85f69e4577f81"] evm_release_tx_hashes=["0x23640d4ad68277a065fa6ec70cc26b6bc7d2acf181bf0b6669da1b03fa668885"] balance_delta_wei=1000000000000
 ```
 
-## Builder Sandbox Smoke
+## Local Anvil Sandbox Smoke
 
 The branch adds a one-command builder path:
 
@@ -319,10 +334,12 @@ Result: passed.
 - Inbound Miden payout uses public P2ID notes so a separate client can discover the note.
 - EVM release/refund and Miden mint/consume paths persist tx ids and emit structured evidence logs.
 - Restart/resume tolerates stale pre-durable Miden idempotency keys.
-- `make sandbox` starts the public Miden testnet + Anvil builder sandbox with a
-  fresh seed when the placeholder is still present.
-- `/lab` provides a clickable UI, embedded Mermaid diagrams, live flow cards,
-  lifecycle events, and selected quote/tx artifacts.
+- `make sepolia` starts the default Sepolia native ETH + public Miden testnet
+  profile after `.env` is filled with testnet-only keys.
+- `make sandbox` starts the local Anvil fallback with a fresh seed when the
+  placeholder is still present.
+- `/lab` provides a clickable UI for the Anvil fallback, embedded Mermaid
+  diagrams, live flow cards, lifecycle events, and selected quote/tx artifacts.
 - `./bin/bridgectl` provides status, quote, demo, flow, log, and reset commands
   for third-party builders and future agents.
 - `/healthz` is local liveness; `/readyz` includes Miden RPC readiness and may
