@@ -148,7 +148,7 @@ mod tests {
                             "amount": "1000",
                             "refundTo": "0xfeed",
                             "refundType": "ORIGIN_CHAIN",
-                            "recipient": "recipient",
+                            "recipient": "0xc98bb07c188cd2500e13f68a069cdc",
                             "recipientType": "DESTINATION_CHAIN",
                             "deadline": "2026-06-12T00:00:00Z"
                         })
@@ -202,7 +202,7 @@ mod tests {
                             "amount": "1000",
                             "refundTo": "0xfeed",
                             "refundType": "ORIGIN_CHAIN",
-                            "recipient": "recipient",
+                            "recipient": "0xc98bb07c188cd2500e13f68a069cdc",
                             "recipientType": "DESTINATION_CHAIN",
                             "deadline": "2026-06-12T00:00:00Z"
                         })

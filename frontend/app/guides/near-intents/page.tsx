@@ -44,6 +44,16 @@ export default function NearIntentsGuidePage() {
 
         <article className="guide-card">
           <span>2</span>
+          <h2>Connect wallets</h2>
+          <p>
+            The lab uses an injected Sepolia wallet for deposits, refunds, and EVM recipients. Miden currently uses an
+            explicit testnet account ID field; connect a real Miden wallet by replacing that field once a browser wallet
+            provider contract is available.
+          </p>
+        </article>
+
+        <article className="guide-card">
+          <span>3</span>
           <h2>Point the frontend at it</h2>
           <p>
             In Docker Compose, set <code>LAB_UI_BRIDGE_API_BASE</code> to the bridge service URL reachable from the{" "}
@@ -55,7 +65,7 @@ BRIDGE_API_BASE=https://your-bridge.example`}</pre>
         </article>
 
         <article className="guide-card">
-          <span>3</span>
+          <span>4</span>
           <h2>Keep demo routes separate</h2>
           <p>
             <code>/demo/*</code> exists only for this lab. Builder integrations should depend on <code>/v0/*</code>;
@@ -65,7 +75,7 @@ BRIDGE_API_BASE=https://your-bridge.example`}</pre>
         </article>
 
         <article className="guide-card">
-          <span>4</span>
+          <span>5</span>
           <h2>Validate the contract</h2>
           <p>
             Start with dry quotes, confirm token IDs, submit a known Sepolia tx hash, and poll status through terminal

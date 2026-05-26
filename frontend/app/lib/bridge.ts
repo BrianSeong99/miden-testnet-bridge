@@ -58,6 +58,71 @@ export type QuoteResponse = {
   quote: Quote;
 };
 
+export type QuoteRequestPayload = {
+  dry: boolean;
+  depositMode: "SIMPLE";
+  swapType: "EXACT_INPUT";
+  slippageTolerance: number;
+  originAsset: string;
+  depositType: "ORIGIN_CHAIN";
+  destinationAsset: string;
+  amount: string;
+  refundTo: string;
+  refundType: "ORIGIN_CHAIN";
+  recipient: string;
+  connectedWallets?: string[];
+  recipientType: "DESTINATION_CHAIN";
+  deadline: string;
+  referral?: string;
+};
+
+export type SubmitDepositTxResponse = {
+  correlationId: string;
+  quoteResponse: QuoteResponse;
+  status: string;
+  updatedAt: string;
+};
+
+export type AgglayerL1DepositPlan = {
+  dryRun: true;
+  direction: "sepolia-to-miden";
+  bridgeAddress: string;
+  destinationNetwork: number;
+  destinationMidenAccountId: string;
+  destinationMidenAccountHex: string;
+  destinationBridgeAddress: string;
+  amountEth: string;
+  amountWei: string;
+  gasTokenAddress: string;
+  forceUpdateGlobalExitRoot: boolean;
+  gasLimit: number;
+  calldata: string;
+  statusUrl: string;
+  command: string[];
+  shellCommand: string;
+  warnings: string[];
+};
+
+export type AgglayerL2WithdrawPlan = {
+  dryRun: true;
+  direction: "miden-to-sepolia";
+  midenAccountId: string;
+  midenAccountIdHex: string;
+  ethAccountId: string;
+  bridgeId: string;
+  bridgeIdHex: string;
+  faucetId: string;
+  faucetIdHex: string;
+  destinationNetwork: number;
+  amount: string;
+  command: string[];
+  shellCommand: string;
+  statusUrl: string;
+  warnings: string[];
+};
+
+export type AgglayerPlan = AgglayerL1DepositPlan | AgglayerL2WithdrawPlan;
+
 export type DemoArtifacts = {
   evmDepositTxHashes: string[];
   evmReleaseTxHashes: string[];

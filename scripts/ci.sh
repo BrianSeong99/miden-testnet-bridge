@@ -3,6 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 run_ci() {
+  export PATH="/usr/local/cargo/bin:${PATH}"
+  if ! command -v docker >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y --no-install-recommends docker-cli
+  fi
   rustup component add clippy rustfmt 2>&1 | tail -1
   cargo fmt --check
   cargo clippy --all-targets -- -D warnings

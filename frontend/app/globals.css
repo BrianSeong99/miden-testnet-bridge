@@ -313,6 +313,100 @@ h2 {
   white-space: nowrap;
 }
 
+.wallet-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.wallet-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.wallet-card.connected {
+  border-color: rgba(34, 120, 79, 0.28);
+  background: rgba(34, 120, 79, 0.06);
+}
+
+.wallet-card.invalid {
+  border-color: rgba(179, 68, 54, 0.26);
+  background: rgba(179, 68, 54, 0.06);
+}
+
+.wallet-card div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.wallet-card span,
+.wallet-card small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.wallet-card strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-card small {
+  text-transform: none;
+}
+
+.wallet-connect {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 106px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+  padding: 0 11px;
+}
+
+.wallet-connect span {
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  text-transform: none;
+}
+
+.miden-wallet {
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.4fr);
+}
+
+.miden-wallet input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+  padding: 0 10px;
+}
+
 .direction-tabs button {
   background: transparent;
   color: var(--muted);
@@ -473,6 +567,53 @@ h2 {
   background: rgba(179, 68, 54, 0.07);
   color: var(--red);
   overflow-wrap: anywhere;
+}
+
+.plan-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(47, 102, 136, 0.24);
+  border-radius: var(--radius);
+  background: rgba(47, 102, 136, 0.06);
+  padding: 12px;
+}
+
+.plan-card h2 {
+  font-size: 16px;
+}
+
+.plan-card a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+  padding: 0 10px;
+}
+
+.plan-card pre {
+  overflow: auto;
+  max-height: 160px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 10px;
+}
+
+.plan-card p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .runtime-row {
@@ -974,6 +1115,15 @@ h2 {
   .mode-callout a {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .wallet-card,
+  .miden-wallet {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-connect {
+    width: 100%;
   }
 
   .guide-hero {
