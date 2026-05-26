@@ -90,6 +90,10 @@ print private keys. It needs:
 - public Miden testnet RPC
 - host access to the Compose Postgres port
 
+`SOLVER_PRIVATE_KEY` is not just a gas payer. In the mock Miden -> Sepolia path,
+it is the Sepolia-side liquidity source for releases and refunds, so fund it for
+the destination amount plus gas.
+
 Live Sepolia evidence from 2026-05-15:
 
 ```text

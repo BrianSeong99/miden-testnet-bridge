@@ -119,7 +119,9 @@ Install these on the host:
 - A Sepolia RPC endpoint. The public Tenderly endpoint works for basic testing:
   `https://gateway.tenderly.co/public/sepolia`.
 - Sepolia ETH for two test-only addresses:
-  - `SOLVER_PRIVATE_KEY`: pays releases and gas.
+  - `SOLVER_PRIVATE_KEY`: pays Miden -> Sepolia releases, refunds, and gas.
+    Keep it funded for the destination amount plus Sepolia gas before outbound
+    mock runs.
   - `DEMO_EVM_FUNDED_PRIVATE_KEY`: sends deposits for the evidence runner.
 
 You do not need to run a local Miden node. The supported path uses public Miden
@@ -349,6 +351,11 @@ For outbound Miden deposits:
 - The bridge poller scans public notes, validates the memo, consumes the note
   with the bridge account, and releases Sepolia ETH.
 
+This is not a trustless AggLayer claim. In the mock NEAR Intents path, Sepolia
+release liquidity comes from `SOLVER_PRIVATE_KEY`, so the solver address must be
+pre-funded with the release amount plus gas. If it is not funded, the Miden note
+can be consumed while the quote remains stuck before the Sepolia release tx.
+
 Reference implementations in this repo:
 
 - `src/bin/sepolia_e2e.rs` for a full `/v0/*` Sepolia native ETH run.
@@ -504,7 +511,7 @@ returned `quote.depositAddress`, `quote.depositMemo`, faucet, and amount.
 
 For the mock NEAR Intents path, the service releases Sepolia ETH from the
 configured `SOLVER_PRIVATE_KEY`. If the quote is stuck in `PROCESSING`, confirm
-that key has Sepolia ETH for gas and the release amount. For AggLayer, no
+that key has Sepolia ETH for the release amount plus gas. For AggLayer, no
 release is automatic: use `/agglayer/l2/withdraw/claim/plan` after the
 Gateway FM bridge row reports `ready_for_claim=true`, then broadcast the
 returned `claimAsset` command with a funded Sepolia test key.

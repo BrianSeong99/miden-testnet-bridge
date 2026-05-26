@@ -201,7 +201,10 @@ deriving one deposit account per quote.
 - `curl` and optionally `jq`.
 - Network access to `https://rpc.testnet.miden.io`.
 - A Sepolia RPC endpoint.
-- Sepolia ETH on the test-only solver key and test-user key.
+- Sepolia ETH on the test-only solver key and test-user key. For the mock
+  NEAR Intents path, `SOLVER_PRIVATE_KEY` must hold enough Sepolia ETH for both
+  destination releases and release/refund gas; otherwise Miden -> Sepolia quotes
+  can stay in `PROCESSING` after the Miden note is consumed.
 
 No local Miden node is required for the supported path. The bridge uses
 `miden-client` network defaults for Miden testnet, including the native remote
@@ -280,6 +283,10 @@ quote.depositMemo
 a public Miden note carrying the quoted asset and memo, then the bridge poller
 consumes that note and releases Sepolia ETH.
 
+The mock service is solver-funded on the Sepolia side: the configured
+`SOLVER_PRIVATE_KEY` sends the destination release transaction. Keep that key
+pre-funded with the release amount plus Sepolia gas before running this flow.
+
 Poll:
 
 ```bash
@@ -302,7 +309,7 @@ The runner drives both directions through the mock 1Click `/v0/*` API:
   claim.
 - Sepolia ETH deposit to fund the user's Miden source account -> Miden public
   `BridgeOutV1` note from that user account -> bridge consume -> Sepolia ETH
-  release.
+  release from the funded solver key.
 
 It reads `.env`, never prints private keys, and defaults to
 `LIVE_E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/miden_bridge`
@@ -373,7 +380,7 @@ sequenceDiagram
 | `MIDEN_STORE_DIR` | Yes | `/var/lib/bridge/miden-store` in Compose | Persistent SQLite store plus keystore for the Rust Miden client. |
 | `EVM_RPC_URL` | Yes | `https://gateway.tenderly.co/public/sepolia` in `.env.sepolia.example` | Sepolia RPC endpoint. |
 | `MASTER_MNEMONIC` | Yes | none | Seed material for deterministic Sepolia quote wallet derivation. Use a test mnemonic only. |
-| `SOLVER_PRIVATE_KEY` | Yes | none | Funded Sepolia test key used for release and refund transactions. |
+| `SOLVER_PRIVATE_KEY` | Yes | none | Funded Sepolia test key used for release and refund transactions. For Miden -> Sepolia mock releases it must cover the destination amount plus gas. |
 | `EVM_CHAIN_ID` | No | `11155111` | Sepolia chain id. |
 | `EVM_TOKEN_ADDRESSES_PATH` | No | `/state/token-addresses.json` | Optional Sepolia ERC20 token-address file. Native ETH works without ERC20 addresses. |
 | `EVM_REQUIRED_CONFIRMATIONS` | No | `2` | Number of Sepolia confirmations required before deposit confirmation or solver release/refund completion. |

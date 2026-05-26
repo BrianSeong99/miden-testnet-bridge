@@ -26,6 +26,10 @@ SOLVER_PRIVATE_KEY=<funded-sepolia-solver-private-key>
 DEMO_EVM_FUNDED_PRIVATE_KEY=<funded-sepolia-test-user-private-key>
 ```
 
+For Miden -> Sepolia mock releases, the solver key is the Sepolia liquidity
+source. It must hold the release amount plus gas before the bridge consumes the
+Miden `BridgeOutV1` note.
+
 Start:
 
 ```bash
