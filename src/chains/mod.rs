@@ -1,3 +1,4 @@
+pub mod agglayer;
 pub mod evm;
 pub mod miden;
 pub mod miden_bootstrap;

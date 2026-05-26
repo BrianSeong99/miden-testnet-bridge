@@ -1,3 +1,4 @@
+use alloy::primitives::Address;
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -52,6 +53,7 @@ pub(crate) async fn create_quote(
 
     validate_profile_asset(state, &request.origin_asset)?;
     validate_profile_asset(state, &request.destination_asset)?;
+    validate_quote_participants(&request)?;
 
     let origin_symbol = asset_symbol(&request.origin_asset)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -203,6 +205,22 @@ fn validate_profile_asset(state: &AppState, asset_id: &str) -> Result<(), ApiErr
     Ok(())
 }
 
+fn validate_quote_participants(request: &QuoteRequest) -> Result<(), ApiError> {
+    if is_evm_asset_id(&request.origin_asset) && !is_evm_asset_id(&request.destination_asset) {
+        parse_account_id(&request.recipient).map_err(|error| {
+            ApiError::bad_request(format!("recipient must be a Miden account id: {error}"))
+        })?;
+    }
+
+    if !is_evm_asset_id(&request.origin_asset) && is_evm_asset_id(&request.destination_asset) {
+        Address::from_str(&request.recipient).map_err(|error| {
+            ApiError::bad_request(format!("recipient must be a Sepolia address: {error}"))
+        })?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{
@@ -233,7 +251,7 @@ mod tests {
             "amount": "1000",
             "refundTo": "0xfeed",
             "refundType": "ORIGIN_CHAIN",
-            "recipient": "recipient",
+            "recipient": "0xc98bb07c188cd2500e13f68a069cdc",
             "recipientType": "DESTINATION_CHAIN",
             "deadline": "2026-06-12T00:00:00Z"
         })
@@ -251,7 +269,7 @@ mod tests {
             "amount": "1000",
             "refundTo": "0xrefund",
             "refundType": "ORIGIN_CHAIN",
-            "recipient": "0xrecipient",
+            "recipient": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
             "recipientType": "DESTINATION_CHAIN",
             "deadline": "2026-06-12T00:00:00Z"
         })
@@ -336,6 +354,27 @@ mod tests {
             sample_quote_request(),
             "depositMode",
             Value::String("MEMO".to_owned()),
+        );
+        let response = app
+            .oneshot(
+                Request::post("/v0/quote")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn miden_destination_quote_rejects_invalid_recipient() {
+        let app = app(AppState::new(memory_state()));
+        let payload = with_override(
+            sample_quote_request(),
+            "recipient",
+            Value::String("mcst1not-a-real-account".to_owned()),
         );
         let response = app
             .oneshot(
@@ -484,7 +523,10 @@ mod tests {
         assert_eq!(memo.storage.destination_asset, "eth-sepolia:eth");
         assert_eq!(memo.storage.amount_in, "1000");
         assert_eq!(memo.storage.min_amount_out, "1000");
-        assert_eq!(memo.storage.destination_recipient, "0xrecipient");
+        assert_eq!(
+            memo.storage.destination_recipient,
+            "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
+        );
         assert_eq!(memo.storage.refund_account, "0xrefund");
 
         let stored = store

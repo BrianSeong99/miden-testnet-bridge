@@ -143,6 +143,15 @@ pub fn app(state: AppState) -> Router {
             "/demo/flows/outbound/submit",
             post(api::demo::submit_outbound),
         )
+        .route("/agglayer/info", get(api::agglayer::info))
+        .route(
+            "/agglayer/l1/deposit/plan",
+            post(api::agglayer::l1_deposit_plan),
+        )
+        .route(
+            "/agglayer/l2/withdraw/plan",
+            post(api::agglayer::l2_withdraw_plan),
+        )
         .route("/healthz", get(api::healthz::healthz))
         .route("/readyz", get(api::healthz::readyz))
         .layer(RedactAuthorizationLayer)

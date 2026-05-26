@@ -92,6 +92,39 @@ GET  /v0/status
 walkthroughs and manual demos with funded test keys. App integrations should
 still use `/v0/*`.
 
+## AggLayer Testnet Helper
+
+The lab also exposes an AggLayer mode for the public Bali/Sepolia testnet path
+from `0xMiden/miden-client#2173`. The backend is a dry-run command planner,
+not a custody service. The frontend can hand the planned Sepolia transaction to
+an injected browser wallet only after the user reviews and confirms it.
+
+```text
+GET  /agglayer/info
+POST /agglayer/l1/deposit/plan
+POST /agglayer/l2/withdraw/plan
+```
+
+The helper records the post-relaunch constants from the PR review notes:
+
+```text
+DEST_NETWORK=76
+L2_CHAIN_ID=1022211914
+MIDEN_BRIDGE_ID=mcst1arychvrurzxdy5qwz0mg5p5umsvsepyx
+MIDEN_FAUCET_ID=mcst1arnrhfau9svl7cpu2tr8lfzzd5j87wwe
+```
+
+Sepolia to Miden returns the padded bridge destination, `bridgeAsset` calldata,
+a Gateway FM status URL, and a dry-run `cast send` command. Miden to Sepolia
+returns the `bridge-out-tool` command shape and status URL; live B2AGG note
+submission and `claimAsset` remain explicit operator actions with testnet keys.
+
+The lab UI includes a native injected-wallet connector for Sepolia wallets
+such as MetaMask or Rabby. For the NEAR Intents mock flow, Sepolia deposits are
+sent from the connected browser wallet and submitted back to `/v0/deposit/submit`.
+For Miden, the UI accepts a testnet account ID because there is not yet a
+standard injected Miden browser wallet provider in this mock service.
+
 ## What This Proves
 
 - Inbound: a Sepolia native ETH deposit is verified through
