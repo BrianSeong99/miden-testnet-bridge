@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownUp, ArrowRight, CheckCircle2, ChevronRight, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowDownUp, ArrowRight, BookOpen, CheckCircle2, ChevronRight, RefreshCw } from "lucide-react";
 import {
   activeStatuses,
   amountLabel,
@@ -19,6 +19,7 @@ import {
 } from "../lib/bridge";
 
 type Direction = "evm-to-miden" | "miden-to-evm";
+type BridgeMode = "near-intents" | "agglayer" | "epoch";
 
 type RuntimeState = {
   apiHealth: string;
@@ -61,6 +62,39 @@ const directionCopy: Record<
   },
 };
 
+const bridgeModeCopy: Record<
+  BridgeMode,
+  {
+    label: string;
+    badge: string;
+    title: string;
+    description: string;
+    enabled: boolean;
+  }
+> = {
+  "near-intents": {
+    label: "NEAR Intents",
+    badge: "Mock 1Click",
+    title: "NEAR Intents mock",
+    description: "Runs the current Sepolia to Miden mock 1Click flow through this lab backend.",
+    enabled: true,
+  },
+  agglayer: {
+    label: "AggLayer",
+    badge: "Testnet planned",
+    title: "AggLayer testnet",
+    description: "Visible now so the UI shape is stable; executable bridging lands with the AggLayer backend issue.",
+    enabled: false,
+  },
+  epoch: {
+    label: "Epoch",
+    badge: "Pending API",
+    title: "Epoch bridge",
+    description: "Reserved for an Epoch integration contract once its testnet API and assets are defined.",
+    enabled: false,
+  },
+};
+
 function loadStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   const raw = window.localStorage.getItem(key);
@@ -85,6 +119,7 @@ export function BridgeLab() {
     demoState: "checking",
     runtimeProfile: "unknown",
   });
+  const [bridgeMode, setBridgeMode] = useState<BridgeMode>("near-intents");
   const [direction, setDirection] = useState<Direction>("evm-to-miden");
   const [amount, setAmount] = useState(defaultAmount);
   const [flows, setFlows] = useState<Map<string, DemoFlow>>(new Map());
@@ -96,6 +131,8 @@ export function BridgeLab() {
   const [error, setError] = useState<string | null>(null);
 
   const config = directionCopy[direction];
+  const selectedBridgeMode = bridgeModeCopy[bridgeMode];
+  const mockApiEnabled = runtime.demoState === "enabled";
 
   const sortedFlows = useMemo(
     () => [...flows.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
@@ -147,6 +184,7 @@ export function BridgeLab() {
     }
 
     setRuntime(next);
+    return next;
   }, []);
 
   const refreshFlows = useCallback(async () => {
@@ -163,7 +201,12 @@ export function BridgeLab() {
     setBusy("refresh");
     setError(null);
     try {
-      await Promise.all([refreshRuntime(), refreshFlows()]);
+      const nextRuntime = await refreshRuntime();
+      if (nextRuntime.demoState === "enabled") {
+        await refreshFlows();
+      } else {
+        setFlows(new Map());
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -187,15 +230,21 @@ export function BridgeLab() {
   useEffect(() => {
     setInboundWallet(loadStorage<Wallet | null>(storageKeys.inboundWallet, null));
     setOutboundWallet(loadStorage<Wallet | null>(storageKeys.outboundWallet, null));
-    void Promise.allSettled([refreshRuntime(), refreshFlows()]);
+    void refreshRuntime().then((nextRuntime) => {
+      if (nextRuntime.demoState === "enabled") {
+        void refreshFlows().catch(() => undefined);
+      }
+    });
   }, [refreshFlows, refreshRuntime]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void refreshActiveFlows();
+      if (mockApiEnabled) {
+        void refreshActiveFlows();
+      }
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [refreshActiveFlows]);
+  }, [mockApiEnabled, refreshActiveFlows]);
 
   async function startInbound() {
     await run("start-inbound", async () => {
@@ -255,6 +304,8 @@ export function BridgeLab() {
   }
 
   async function submitPrimaryAction() {
+    if (!selectedBridgeMode.enabled || !mockApiEnabled) return;
+
     if (direction === "evm-to-miden") {
       await startInbound();
       return;
@@ -272,12 +323,15 @@ export function BridgeLab() {
     setDirection((current) => (current === "evm-to-miden" ? "miden-to-evm" : "evm-to-miden"));
   }
 
-  const primaryLabel =
-    busy === "start-inbound" || busy === "fund-outbound" || busy === "submit-outbound"
-      ? "Submitting"
-      : direction === "miden-to-evm" && !outboundWallet
-        ? "Fund Miden wallet"
-        : config.submitLabel;
+  function getPrimaryLabel() {
+    if (!selectedBridgeMode.enabled) return `${selectedBridgeMode.label} unavailable`;
+    if (!mockApiEnabled) return runtime.demoState === "checking" ? "Checking mock API" : "Mock API disabled";
+    if (busy === "start-inbound" || busy === "fund-outbound" || busy === "submit-outbound") return "Submitting";
+    if (direction === "miden-to-evm" && !outboundWallet) return "Fund Miden wallet";
+    return config.submitLabel;
+  }
+
+  const primaryLabel = getPrimaryLabel();
 
   const runtimeOk = runtime.apiHealth === "ok" && runtime.demoState === "enabled";
 
@@ -303,10 +357,46 @@ export function BridgeLab() {
         <div className="bridge-card">
           <div className="bridge-heading">
             <div>
-              <p className="eyebrow">Local bridge lab</p>
+              <p className="eyebrow">{selectedBridgeMode.title}</p>
               <h1>{config.title}</h1>
             </div>
             <p className="active-count">{activeFlowCount} active</p>
+          </div>
+
+          <label className="bridge-mode-select">
+            <span>Bridge type</span>
+            <select
+              value={bridgeMode}
+              onChange={(event) => setBridgeMode(event.target.value as BridgeMode)}
+              aria-label="Bridge type"
+            >
+              {(Object.keys(bridgeModeCopy) as BridgeMode[]).map((item) => (
+                <option key={item} value={item}>
+                  {bridgeModeCopy[item].label}
+                </option>
+              ))}
+            </select>
+            <small>{selectedBridgeMode.badge}</small>
+          </label>
+
+          <div className={`mode-callout ${selectedBridgeMode.enabled ? "" : "pending"}`}>
+            <AlertTriangle size={17} strokeWidth={1.8} aria-hidden="true" />
+            <p>
+              {selectedBridgeMode.enabled ? (
+                <>
+                  This is a mock NEAR Intents service. Production builders need to run a NEAR Intents-compatible backend and connect this
+                  frontend to it.
+                </>
+              ) : (
+                selectedBridgeMode.description
+              )}
+            </p>
+            {bridgeMode === "near-intents" ? (
+              <Link href="/guides/near-intents">
+                <BookOpen size={15} strokeWidth={1.8} aria-hidden="true" />
+                <span>Guide</span>
+              </Link>
+            ) : null}
           </div>
 
           <div className="direction-tabs" role="group" aria-label="Bridge direction">
@@ -356,12 +446,17 @@ export function BridgeLab() {
             </div>
           </div>
 
-          <button type="button" className="primary-action" onClick={submitPrimaryAction} disabled={busy !== null || amount.trim() === ""}>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={submitPrimaryAction}
+            disabled={!selectedBridgeMode.enabled || !mockApiEnabled || busy !== null || amount.trim() === ""}
+          >
             <span>{primaryLabel}</span>
             <ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
           </button>
 
-          {direction === "evm-to-miden" && inboundWallet ? (
+          {selectedBridgeMode.enabled && mockApiEnabled && direction === "evm-to-miden" && inboundWallet ? (
             <button type="button" className="secondary-action" onClick={claimInbound} disabled={busy !== null}>
               <CheckCircle2 size={17} strokeWidth={1.75} aria-hidden="true" />
               <span>{busy === "claim-inbound" ? "Claiming" : "Claim latest Miden note"}</span>
