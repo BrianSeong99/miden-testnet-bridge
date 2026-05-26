@@ -82,6 +82,12 @@ export default function AggLayerGuidePage() {
             B2AGG note or call <code>claimAsset</code>. The connected Sepolia wallet is used as the destination account
             in the generated command.
           </p>
+          <p>
+            For readiness, poll the returned <code>/bridges/&lt;sepolia-address&gt;</code> URL and look for a row with{" "}
+            <code>ready_for_claim=true</code>, <code>dest_net=0</code>, and an empty <code>claim_tx_hash</code>. The{" "}
+            <code>/claims/&lt;sepolia-address&gt;</code> URL is post-claim history; it can be empty while funds are
+            already ready to claim.
+          </p>
           <pre>{`curl -s /api/bridge/agglayer/l2/withdraw/plan \\
   -H 'content-type: application/json' \\
   -d '{
@@ -100,7 +106,10 @@ export default function AggLayerGuidePage() {
           </p>
           <ul>
             <li>Sepolia to Miden: poll the returned deposit status URL, then consume notes with miden-client.</li>
-            <li>Miden to Sepolia: wait for certificate settlement, then use the upstream claim script.</li>
+            <li>
+              Miden to Sepolia: wait for certificate settlement, fetch the merkle proof, then run the generated{" "}
+              <code>claimAsset</code> command with a funded Sepolia test key.
+            </li>
           </ul>
         </article>
       </section>

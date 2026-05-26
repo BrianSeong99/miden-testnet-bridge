@@ -26,6 +26,7 @@ pub const DEFAULT_AMOUNT_ETH: &str = "0.001";
 pub const DEFAULT_MIDEN_WITHDRAW_AMOUNT: &str = "10000";
 pub const VERSION_PIN: &str = "deployed Bali AggLayer: miden-client v0.14.4 / Poseidon2";
 pub const SOURCE_NOTE: &str = "0xMiden/miden-client#2173 review notes, rechecked 2026-05-26";
+pub const CLAIM_ASSET_SIGNATURE: &str = "claimAsset(bytes32[32],bytes32[32],uint256,bytes32,bytes32,uint32,address,uint32,address,uint256,bytes)";
 
 sol! {
     function bridgeAsset(uint32 destinationNetwork, address destinationAddress, uint256 amount, address token, bool forceUpdateGlobalExitRoot, bytes permitData);
@@ -115,7 +116,76 @@ pub struct AgglayerL2WithdrawPlan {
     pub command: Vec<String>,
     pub shell_command: String,
     pub status_url: String,
+    pub claims_url: String,
+    pub merkle_proof_url_template: String,
+    pub claim_command_template: String,
+    pub readiness_checks: Vec<String>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct AgglayerL2ClaimPlanRequest {
+    pub eth_account_id: String,
+    pub eth_keystore: Option<String>,
+    pub sepolia_rpc_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgglayerL2ClaimPlan {
+    pub ready_for_claim: bool,
+    pub direction: &'static str,
+    pub bridge_address: String,
+    pub eth_account_id: String,
+    pub status_url: String,
+    pub claims_url: String,
+    pub merkle_proof_url: Option<String>,
+    pub deposit: Option<AgglayerBridgeDeposit>,
+    pub command: Vec<String>,
+    pub shell_command: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct AgglayerBridgeDeposit {
+    pub leaf_type: Option<u64>,
+    pub orig_net: u32,
+    pub orig_addr: String,
+    pub amount: String,
+    pub dest_net: u32,
+    pub dest_addr: String,
+    pub block_num: String,
+    pub deposit_cnt: u64,
+    pub network_id: u32,
+    pub tx_hash: String,
+    #[serde(default)]
+    pub claim_tx_hash: String,
+    #[serde(default)]
+    pub metadata: String,
+    pub ready_for_claim: bool,
+    pub global_index: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BridgeDepositsResponse {
+    deposits: Vec<AgglayerBridgeDeposit>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+struct BridgeProofData {
+    main_exit_root: String,
+    rollup_exit_root: String,
+    merkle_proof: Vec<String>,
+    rollup_merkle_proof: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BridgeProofResponse {
+    proof: BridgeProofData,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -181,13 +251,13 @@ pub fn agglayer_info() -> Result<AgglayerInfo> {
         miden_to_l1_flow: vec![
             "Build gateway-fm/miden-agglayer bridge-out-tool.",
             "Submit a B2AGG note from the Miden wallet.",
-            "Poll the Gateway FM bridge service for claim readiness.",
-            "Use the reference claimAsset script once a proof is ready.",
+            "Poll /bridges/{sepolia-address} until the Miden-origin row has ready_for_claim=true.",
+            "Fetch /merkle-proof with deposit_cnt and network_id, then call claimAsset on Sepolia.",
         ],
         warnings: vec![
             "Testnet only. Never use mainnet funds or production keys.",
             "The public tutorial is still an open PR; recheck constants before a funded run.",
-            "This service returns dry-run plans and status URLs; live broadcast remains an operator action.",
+            "This service returns dry-run plans; Miden-to-Sepolia claimAsset remains an explicit operator action.",
         ],
     })
 }
@@ -308,11 +378,10 @@ pub fn build_l2_withdraw_plan(
         "--dest-network".to_owned(),
         config.dest_l1_network.to_string(),
     ];
-    let status_url = format!(
-        "{}/bridges/{}",
-        config.bridge_service_api.trim_end_matches('/'),
-        request.eth_account_id
-    );
+    let status_url = bridge_status_url(&config, &request.eth_account_id);
+    let claims_url = claims_url(&config, &request.eth_account_id);
+    let merkle_proof_url_template = merkle_proof_url_template(&config);
+    let claim_command_template = l2_claim_command_template(&config);
 
     Ok(AgglayerL2WithdrawPlan {
         dry_run: true,
@@ -329,10 +398,78 @@ pub fn build_l2_withdraw_plan(
         shell_command: shell_join(&command),
         command,
         status_url,
+        claims_url,
+        merkle_proof_url_template,
+        claim_command_template,
+        readiness_checks: vec![
+            format!("ready_for_claim == true"),
+            format!("network_id == {}", config.dest_network),
+            format!("dest_net == {}", config.dest_l1_network),
+            "claim_tx_hash is empty".to_owned(),
+        ],
         warnings: vec![
             "Dry-run only: this service does not submit B2AGG notes or claim assets.".to_owned(),
+            "Poll the bridges URL for readiness; the claims URL is post-claim history and stays empty until claimAsset lands.".to_owned(),
             "Build gateway-fm/miden-agglayer bridge-out-tool before running the command."
                 .to_owned(),
+        ],
+    })
+}
+
+pub async fn build_l2_claim_plan(
+    config: AgglayerConfig,
+    request: AgglayerL2ClaimPlanRequest,
+) -> Result<AgglayerL2ClaimPlan> {
+    Address::from_str(&request.eth_account_id).context("ethAccountId must be a Sepolia address")?;
+    let status_url = bridge_status_url(&config, &request.eth_account_id);
+    let claims = claims_url(&config, &request.eth_account_id);
+    let deposits = fetch_bridge_deposits(&status_url).await?;
+
+    let Some(deposit) =
+        select_ready_l2_deposit(&deposits, config.dest_network, config.dest_l1_network).cloned()
+    else {
+        return Ok(AgglayerL2ClaimPlan {
+            ready_for_claim: false,
+            direction: "miden-to-sepolia",
+            bridge_address: config.bridge_address,
+            eth_account_id: request.eth_account_id,
+            status_url,
+            claims_url: claims,
+            merkle_proof_url: None,
+            deposit: None,
+            command: Vec::new(),
+            shell_command: None,
+            warnings: vec![
+                "No ready unclaimed Miden-origin bridge row was found yet.".to_owned(),
+                "Keep polling the bridges URL; polling the claims URL before claimAsset will return empty history.".to_owned(),
+            ],
+        });
+    };
+
+    let merkle_proof_url = merkle_proof_url(&config, deposit.deposit_cnt, deposit.network_id);
+    let proof = fetch_bridge_proof(&merkle_proof_url).await?;
+    let sepolia_rpc_url = request
+        .sepolia_rpc_url
+        .unwrap_or_else(|| config.sepolia_rpc_url.clone());
+    let eth_keystore = request
+        .eth_keystore
+        .unwrap_or_else(|| "<sepolia-claimer-keystore>".to_owned());
+    let command = l2_claim_command(&config, &deposit, &proof, &sepolia_rpc_url, &eth_keystore);
+
+    Ok(AgglayerL2ClaimPlan {
+        ready_for_claim: true,
+        direction: "miden-to-sepolia",
+        bridge_address: config.bridge_address,
+        eth_account_id: request.eth_account_id,
+        status_url,
+        claims_url: claims,
+        merkle_proof_url: Some(merkle_proof_url),
+        deposit: Some(deposit),
+        shell_command: Some(shell_join(&command)),
+        command,
+        warnings: vec![
+            "Review the ready bridge row before broadcasting claimAsset.".to_owned(),
+            "The claimer pays Sepolia gas; use testnet keys only.".to_owned(),
         ],
     })
 }
@@ -389,6 +526,157 @@ fn bridge_asset_calldata(
         Bytes::new(),
     ));
     Ok(format!("0x{}", alloy::hex::encode(call.abi_encode())))
+}
+
+async fn fetch_bridge_deposits(status_url: &str) -> Result<Vec<AgglayerBridgeDeposit>> {
+    let response = reqwest::get(status_url)
+        .await
+        .with_context(|| format!("failed to fetch AggLayer bridge status from {status_url}"))?;
+    ensure!(
+        response.status().is_success(),
+        "AggLayer bridge status returned {}",
+        response.status()
+    );
+    let body = response
+        .json::<BridgeDepositsResponse>()
+        .await
+        .context("failed to parse AggLayer bridge status response")?;
+    Ok(body.deposits)
+}
+
+async fn fetch_bridge_proof(merkle_proof_url: &str) -> Result<BridgeProofData> {
+    let response = reqwest::get(merkle_proof_url).await.with_context(|| {
+        format!("failed to fetch AggLayer merkle proof from {merkle_proof_url}")
+    })?;
+    ensure!(
+        response.status().is_success(),
+        "AggLayer merkle proof returned {}",
+        response.status()
+    );
+    let body = response
+        .json::<BridgeProofResponse>()
+        .await
+        .context("failed to parse AggLayer merkle proof response")?;
+    Ok(body.proof)
+}
+
+fn select_ready_l2_deposit(
+    deposits: &[AgglayerBridgeDeposit],
+    miden_network_id: u32,
+    l1_network_id: u32,
+) -> Option<&AgglayerBridgeDeposit> {
+    deposits.iter().find(|deposit| {
+        deposit.ready_for_claim
+            && deposit.network_id == miden_network_id
+            && deposit.dest_net == l1_network_id
+            && deposit.claim_tx_hash.trim().is_empty()
+    })
+}
+
+fn l2_claim_command(
+    config: &AgglayerConfig,
+    deposit: &AgglayerBridgeDeposit,
+    proof: &BridgeProofData,
+    sepolia_rpc_url: &str,
+    eth_keystore: &str,
+) -> Vec<String> {
+    vec![
+        "cast".to_owned(),
+        "send".to_owned(),
+        config.bridge_address.clone(),
+        CLAIM_ASSET_SIGNATURE.to_owned(),
+        fixed_bytes32_array(&proof.merkle_proof),
+        fixed_bytes32_array(&proof.rollup_merkle_proof),
+        deposit.global_index.clone(),
+        proof.main_exit_root.clone(),
+        proof.rollup_exit_root.clone(),
+        deposit.orig_net.to_string(),
+        deposit.orig_addr.clone(),
+        deposit.dest_net.to_string(),
+        deposit.dest_addr.clone(),
+        deposit.amount.clone(),
+        normalized_metadata(&deposit.metadata),
+        "--keystore".to_owned(),
+        eth_keystore.to_owned(),
+        "--rpc-url".to_owned(),
+        sepolia_rpc_url.to_owned(),
+    ]
+}
+
+fn l2_claim_command_template(config: &AgglayerConfig) -> String {
+    let command = vec![
+        "cast".to_owned(),
+        "send".to_owned(),
+        config.bridge_address.clone(),
+        CLAIM_ASSET_SIGNATURE.to_owned(),
+        "<local-merkle-proof[32]>".to_owned(),
+        "<rollup-merkle-proof[32]>".to_owned(),
+        "<global-index>".to_owned(),
+        "<main-exit-root>".to_owned(),
+        "<rollup-exit-root>".to_owned(),
+        "<orig-net>".to_owned(),
+        "<orig-token-address>".to_owned(),
+        "<dest-net>".to_owned(),
+        "<dest-address>".to_owned(),
+        "<amount>".to_owned(),
+        "<metadata-or-0x>".to_owned(),
+        "--keystore".to_owned(),
+        "<sepolia-claimer-keystore>".to_owned(),
+        "--rpc-url".to_owned(),
+        config.sepolia_rpc_url.clone(),
+    ];
+    shell_join(&command)
+}
+
+fn fixed_bytes32_array(values: &[String]) -> String {
+    let zero = format!("0x{}", "00".repeat(32));
+    let mut padded = values.to_vec();
+    while padded.len() < 32 {
+        padded.push(zero.clone());
+    }
+    format!(
+        "[{}]",
+        padded.into_iter().take(32).collect::<Vec<_>>().join(",")
+    )
+}
+
+fn normalized_metadata(metadata: &str) -> String {
+    let trimmed = metadata.trim();
+    if trimmed.is_empty() || trimmed == "0x" {
+        "0x".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn bridge_status_url(config: &AgglayerConfig, eth_account_id: &str) -> String {
+    format!(
+        "{}/bridges/{}?limit=20&offset=0",
+        config.bridge_service_api.trim_end_matches('/'),
+        eth_account_id
+    )
+}
+
+fn claims_url(config: &AgglayerConfig, eth_account_id: &str) -> String {
+    format!(
+        "{}/claims/{}?limit=20&offset=0",
+        config.bridge_service_api.trim_end_matches('/'),
+        eth_account_id
+    )
+}
+
+fn merkle_proof_url_template(config: &AgglayerConfig) -> String {
+    format!(
+        "{}/merkle-proof?deposit_cnt=<deposit_cnt>&net_id=<network_id>",
+        config.bridge_service_api.trim_end_matches('/')
+    )
+}
+
+fn merkle_proof_url(config: &AgglayerConfig, deposit_cnt: u64, network_id: u32) -> String {
+    format!(
+        "{}/merkle-proof?deposit_cnt={deposit_cnt}&net_id={network_id}",
+        config.bridge_service_api.trim_end_matches('/')
+    )
 }
 
 fn parse_eth_to_wei(value: &str) -> Result<U256> {
@@ -602,7 +890,124 @@ mod tests {
         assert_eq!(plan.destination_network, 0);
         assert!(plan.shell_command.contains("bridge-out-tool"));
         assert!(plan.shell_command.contains("--dest-network 0"));
+        assert!(plan.status_url.contains("/bridges/"));
+        assert!(plan.status_url.contains("limit=20&offset=0"));
+        assert!(plan.claims_url.contains("/claims/"));
+        assert!(
+            plan.merkle_proof_url_template
+                .contains("/merkle-proof?deposit_cnt=<deposit_cnt>&net_id=<network_id>")
+        );
+        assert!(
+            plan.claim_command_template
+                .contains("claimAsset(bytes32[32],bytes32[32],uint256")
+        );
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|warning| warning.contains("claims URL is post-claim history"))
+        );
         assert_eq!(plan.amount, "10000");
+    }
+
+    #[test]
+    fn selects_ready_unclaimed_miden_origin_deposit() {
+        let deposits = vec![
+            AgglayerBridgeDeposit {
+                leaf_type: Some(1),
+                orig_net: 0,
+                orig_addr: "0x0000000000000000000000000000000000000000".to_owned(),
+                amount: "10000".to_owned(),
+                dest_net: 0,
+                dest_addr: "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc".to_owned(),
+                block_num: "1".to_owned(),
+                deposit_cnt: 1,
+                network_id: 0,
+                tx_hash: "0xwrong".to_owned(),
+                claim_tx_hash: String::new(),
+                metadata: "0x".to_owned(),
+                ready_for_claim: true,
+                global_index: "1".to_owned(),
+            },
+            AgglayerBridgeDeposit {
+                leaf_type: Some(1),
+                orig_net: 76,
+                orig_addr: "0x0000000000000000000000000000000000000000".to_owned(),
+                amount: "10000".to_owned(),
+                dest_net: 0,
+                dest_addr: "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc".to_owned(),
+                block_num: "2".to_owned(),
+                deposit_cnt: 2,
+                network_id: 76,
+                tx_hash: "0xready".to_owned(),
+                claim_tx_hash: String::new(),
+                metadata: "0x1234".to_owned(),
+                ready_for_claim: true,
+                global_index: "18446744073709551618".to_owned(),
+            },
+            AgglayerBridgeDeposit {
+                leaf_type: Some(1),
+                orig_net: 76,
+                orig_addr: "0x0000000000000000000000000000000000000000".to_owned(),
+                amount: "10000".to_owned(),
+                dest_net: 0,
+                dest_addr: "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc".to_owned(),
+                block_num: "3".to_owned(),
+                deposit_cnt: 3,
+                network_id: 76,
+                tx_hash: "0xclaimed".to_owned(),
+                claim_tx_hash: "0xclaim".to_owned(),
+                metadata: "0x".to_owned(),
+                ready_for_claim: true,
+                global_index: "3".to_owned(),
+            },
+        ];
+
+        let selected = select_ready_l2_deposit(&deposits, 76, 0).expect("ready deposit");
+        assert_eq!(selected.deposit_cnt, 2);
+        assert_eq!(selected.tx_hash, "0xready");
+    }
+
+    #[test]
+    fn claim_command_uses_bridge_service_deposit_and_proof() {
+        let config = test_config();
+        let deposit = AgglayerBridgeDeposit {
+            leaf_type: Some(1),
+            orig_net: 76,
+            orig_addr: "0x0000000000000000000000000000000000000000".to_owned(),
+            amount: "10000".to_owned(),
+            dest_net: 0,
+            dest_addr: "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc".to_owned(),
+            block_num: "2".to_owned(),
+            deposit_cnt: 2,
+            network_id: 76,
+            tx_hash: "0xready".to_owned(),
+            claim_tx_hash: String::new(),
+            metadata: String::new(),
+            ready_for_claim: true,
+            global_index: "18446744073709551618".to_owned(),
+        };
+        let proof = BridgeProofData {
+            main_exit_root: format!("0x{}", "11".repeat(32)),
+            rollup_exit_root: format!("0x{}", "22".repeat(32)),
+            merkle_proof: vec![format!("0x{}", "33".repeat(32))],
+            rollup_merkle_proof: vec![format!("0x{}", "44".repeat(32))],
+        };
+
+        let command = l2_claim_command(
+            &config,
+            &deposit,
+            &proof,
+            "https://ethereum-sepolia-rpc.publicnode.com",
+            "./sepolia-keystore",
+        );
+        let shell = shell_join(&command);
+
+        assert!(shell.contains(CLAIM_ASSET_SIGNATURE));
+        assert!(shell.contains("18446744073709551618"));
+        assert!(shell.contains("--keystore ./sepolia-keystore"));
+        assert!(shell.contains("--rpc-url https://ethereum-sepolia-rpc.publicnode.com"));
+        assert!(shell.contains("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"));
+        assert!(shell.contains(" 0x "));
     }
 
     #[test]

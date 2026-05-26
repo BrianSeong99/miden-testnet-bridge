@@ -103,6 +103,7 @@ an injected browser wallet only after the user reviews and confirms it.
 GET  /agglayer/info
 POST /agglayer/l1/deposit/plan
 POST /agglayer/l2/withdraw/plan
+POST /agglayer/l2/withdraw/claim/plan
 ```
 
 The helper records the post-relaunch constants from the PR review notes:
@@ -116,8 +117,17 @@ MIDEN_FAUCET_ID=mcst1arnrhfau9svl7cpu2tr8lfzzd5j87wwe
 
 Sepolia to Miden returns the padded bridge destination, `bridgeAsset` calldata,
 a Gateway FM status URL, and a dry-run `cast send` command. Miden to Sepolia
-returns the `bridge-out-tool` command shape and status URL; live B2AGG note
-submission and `claimAsset` remain explicit operator actions with testnet keys.
+returns the `bridge-out-tool` command shape, the correct `/bridges/{address}`
+readiness URL, a `/claims/{address}` history URL, and a `claimAsset` command
+template. After the B2AGG note is submitted, poll `/bridges/{address}` for a
+Miden-origin row with `ready_for_claim=true`, `dest_net=0`, and an empty
+`claim_tx_hash`. Do not use `/claims/{address}` as the readiness check; it is
+empty until a manual `claimAsset` transaction lands.
+
+When a row is ready, `POST /agglayer/l2/withdraw/claim/plan` with the Sepolia
+recipient address. The helper fetches the Gateway FM merkle proof and returns a
+dry-run `cast send ... claimAsset(...)` command. Broadcasting remains an
+explicit operator action with a funded Sepolia test key.
 
 The lab UI includes a native injected-wallet connector for Sepolia wallets
 such as MetaMask or Rabby. For the NEAR Intents mock flow, Sepolia deposits are

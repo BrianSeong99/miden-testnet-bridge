@@ -698,6 +698,21 @@ h2 {
   line-height: 1.45;
 }
 
+.plan-links {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.plan-links span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .runtime-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

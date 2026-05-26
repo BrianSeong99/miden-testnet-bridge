@@ -4,8 +4,9 @@ use crate::{
     api::errors::ApiError,
     chains::agglayer::{
         AgglayerConfig, AgglayerInfo, AgglayerL1DepositPlan, AgglayerL1DepositPlanRequest,
-        AgglayerL2WithdrawPlan, AgglayerL2WithdrawPlanRequest, agglayer_info,
-        build_l1_deposit_plan, build_l2_withdraw_plan,
+        AgglayerL2ClaimPlan, AgglayerL2ClaimPlanRequest, AgglayerL2WithdrawPlan,
+        AgglayerL2WithdrawPlanRequest, agglayer_info, build_l1_deposit_plan, build_l2_claim_plan,
+        build_l2_withdraw_plan,
     },
 };
 
@@ -33,6 +34,18 @@ pub async fn l2_withdraw_plan(
     let config =
         AgglayerConfig::from_env().map_err(|error| ApiError::internal(error.to_string()))?;
     build_l2_withdraw_plan(config, request)
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+pub async fn l2_claim_plan(
+    request: Result<Json<AgglayerL2ClaimPlanRequest>, JsonRejection>,
+) -> Result<Json<AgglayerL2ClaimPlan>, ApiError> {
+    let Json(request) = request.map_err(ApiError::from_json_rejection)?;
+    let config =
+        AgglayerConfig::from_env().map_err(|error| ApiError::internal(error.to_string()))?;
+    build_l2_claim_plan(config, request)
+        .await
         .map(Json)
         .map_err(|error| ApiError::bad_request(error.to_string()))
 }
@@ -114,5 +127,51 @@ mod tests {
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn l2_withdraw_plan_includes_claim_guidance() {
+        let app = app(AppState::new(memory_state()));
+        let response = app
+            .oneshot(
+                Request::post("/agglayer/l2/withdraw/plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "midenAccountId": "0xc98bb07c188cd2500e13f68a069cdc",
+                            "ethAccountId": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
+                            "midenWithdrawAmount": "10000"
+                        })
+                        .to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let json: Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(json["direction"], "miden-to-sepolia");
+        assert!(
+            json["statusUrl"]
+                .as_str()
+                .expect("status url")
+                .contains("/bridges/")
+        );
+        assert!(
+            json["claimsUrl"]
+                .as_str()
+                .expect("claims url")
+                .contains("/claims/")
+        );
+        assert!(
+            json["claimCommandTemplate"]
+                .as_str()
+                .expect("claim template")
+                .contains("claimAsset(bytes32[32],bytes32[32],uint256")
+        );
     }
 }

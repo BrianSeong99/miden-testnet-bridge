@@ -118,6 +118,10 @@ export type AgglayerL2WithdrawPlan = {
   command: string[];
   shellCommand: string;
   statusUrl: string;
+  claimsUrl: string;
+  merkleProofUrlTemplate: string;
+  claimCommandTemplate: string;
+  readinessChecks: string[];
   warnings: string[];
 };
 

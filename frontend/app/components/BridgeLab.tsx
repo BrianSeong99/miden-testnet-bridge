@@ -855,8 +855,16 @@ function AgglayerPlanCard({
       <p>
         {canSend
           ? "The backend returned a dry-run plan. Browser-wallet sending requires your explicit Sepolia confirmation."
-          : (plan.warnings[0] ?? "Review the generated command before running it.")}
+          : "After the B2AGG note is submitted, poll the Status link for a ready unclaimed Miden-origin row before running claimAsset."}
       </p>
+      {!canSend ? (
+        <div className="plan-links">
+          <a href={plan.claimsUrl} target="_blank" rel="noreferrer">
+            Claims history
+          </a>
+          <span>{plan.readinessChecks.join(" · ")}</span>
+        </div>
+      ) : null}
       {canSend ? (
         <button type="button" className="secondary-action" onClick={onSend} disabled={busy !== null || !walletReady}>
           <PlugZap size={16} strokeWidth={1.8} aria-hidden="true" />

@@ -98,6 +98,14 @@ In this mock, the solver role runs inside the bridge service. It owns the Miden
 solver account and the Sepolia solver key. Treat it as a role boundary even
 though it is not a separate process here.
 
+AggLayer Miden-to-Sepolia is different from the mock NEAR Intents outbound
+path. AggLayer does not auto-claim the L1 side in this helper. After submitting
+the B2AGG note, poll the Gateway FM `/bridges/{sepolia-address}` endpoint for a
+Miden-origin row with `ready_for_claim=true`, `dest_net=0`, and empty
+`claim_tx_hash`. The `/claims/{sepolia-address}` endpoint is claim history, not
+readiness; it can stay empty while a manual `claimAsset` transaction is already
+available to submit.
+
 ## Prerequisites
 
 Install these on the host:
@@ -493,6 +501,13 @@ docker compose -f compose.sepolia.yaml --env-file .env logs bridge --tail=300 | 
 
 Check that the user created a public Miden `BridgeOutV1` note using exactly the
 returned `quote.depositAddress`, `quote.depositMemo`, faucet, and amount.
+
+For the mock NEAR Intents path, the service releases Sepolia ETH from the
+configured `SOLVER_PRIVATE_KEY`. If the quote is stuck in `PROCESSING`, confirm
+that key has Sepolia ETH for gas and the release amount. For AggLayer, no
+release is automatic: use `/agglayer/l2/withdraw/claim/plan` after the
+Gateway FM bridge row reports `ready_for_claim=true`, then broadcast the
+returned `claimAsset` command with a funded Sepolia test key.
 
 Then inspect:
 
