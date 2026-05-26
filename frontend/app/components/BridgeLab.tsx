@@ -8,6 +8,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   PlugZap,
   RefreshCw,
@@ -605,21 +606,39 @@ export function BridgeLab() {
           <span>Bridge</span>
         </Link>
         <div className="top-actions">
-          <button
-            type="button"
-            className={`nav-wallet ${walletReady ? "connected" : evmWallet ? "wrong" : ""}`}
-            onClick={() =>
-              run("connect-wallet", async () => {
-                await connectWallet();
-              })
-            }
-            disabled={busy !== null}
-            aria-label={walletReady ? `Connected Sepolia wallet ${evmWallet.address}` : "Connect Sepolia wallet"}
-          >
-            <WalletIcon size={16} strokeWidth={1.8} aria-hidden="true" />
-            <span>{walletReady ? formatWalletAddress(evmWallet.address) : evmWallet ? "Wrong network" : "Connect wallet"}</span>
-            <small>{walletReady ? "Sepolia" : "Sepolia"}</small>
-          </button>
+          <div className="nav-toolbar" aria-label="Bridge controls">
+            <label className="nav-route-select">
+              <span>Bridge</span>
+              <select
+                value={bridgeMode}
+                onChange={(event) => selectBridgeMode(event.target.value as BridgeMode)}
+                aria-label="Bridge type"
+              >
+                {(Object.keys(bridgeModeCopy) as BridgeMode[]).map((item) => (
+                  <option key={item} value={item}>
+                    {bridgeModeCopy[item].label}
+                  </option>
+                ))}
+              </select>
+              <small>{selectedBridgeMode.badge}</small>
+              <ChevronDown size={15} strokeWidth={1.8} aria-hidden="true" />
+            </label>
+            <button
+              type="button"
+              className={`nav-wallet ${walletReady ? "connected" : evmWallet ? "wrong" : ""}`}
+              onClick={() =>
+                run("connect-wallet", async () => {
+                  await connectWallet();
+                })
+              }
+              disabled={busy !== null}
+              aria-label={walletReady ? `Connected Sepolia wallet ${evmWallet.address}` : "Connect Sepolia wallet"}
+            >
+              <WalletIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+              <span>{walletReady ? formatWalletAddress(evmWallet.address) : evmWallet ? "Wrong network" : "Connect wallet"}</span>
+              <small>{walletReady ? "Sepolia" : "Sepolia"}</small>
+            </button>
+          </div>
           <span className={`health-pill ${runtimeOk ? "tone-success" : "tone-warning"}`}>
             <span aria-hidden="true" />
             {runtimeOk ? "live" : runtime.apiHealth}
@@ -639,22 +658,6 @@ export function BridgeLab() {
             </div>
             <p className="active-count">{activeFlowCount} active</p>
           </div>
-
-          <label className="bridge-mode-select">
-            <span>Bridge type</span>
-            <select
-              value={bridgeMode}
-              onChange={(event) => selectBridgeMode(event.target.value as BridgeMode)}
-              aria-label="Bridge type"
-            >
-              {(Object.keys(bridgeModeCopy) as BridgeMode[]).map((item) => (
-                <option key={item} value={item}>
-                  {bridgeModeCopy[item].label}
-                </option>
-              ))}
-            </select>
-            <small>{selectedBridgeMode.badge}</small>
-          </label>
 
           <div className={`mode-callout ${selectedBridgeMode.action === "demo" ? "" : "pending"}`}>
             <AlertTriangle size={17} strokeWidth={1.8} aria-hidden="true" />
