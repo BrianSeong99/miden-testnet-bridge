@@ -1,14 +1,22 @@
 services:
   bridge:
-    ports: []
+    ports: !reset []
+    networks:
+      - default
+      - homelab
+
+  lab-ui:
+    ports: !reset []
     networks:
       - default
       - homelab
 
   postgres:
-    ports: []
+    ports: !reset []
+
+  miden-node:
+    ports: !reset []
 
 networks:
   homelab:
     external: true
-

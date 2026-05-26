@@ -7,14 +7,11 @@ the NEAR Intents 1Click API, point their app at it, and test the same
 quote/deposit/status flow they would use against a hosted 1Click service. The
 default documented profile is public Miden testnet plus Sepolia native ETH.
 
-This is testnet-only infrastructure for local testing, Sepolia, Anvil, and
-public Miden testnet. It is not a production bridge, not a mainnet integration
-path, and must not be used with mainnet funds.
+This is testnet-only infrastructure for local testing against Sepolia and public
+Miden testnet. It is not a production bridge, not a mainnet integration path,
+and must not be used with mainnet funds.
 
 The primary path in this repo is Sepolia native ETH plus public Miden testnet.
-The local Anvil profile still exists for offline UI demos and deterministic
-regression work, but it is documented separately at
-[`docs/anvil/local-sandbox.md`](docs/anvil/local-sandbox.md).
 
 ## Terminal Walkthrough
 
@@ -36,7 +33,7 @@ For the full step-by-step walkthrough, start with
 [`docs/builder-testing-guide.md`](docs/builder-testing-guide.md).
 
 ```bash
-git clone https://github.com/BrianSeong99/miden-testnet-bridge.git
+git clone <repo-url>
 cd miden-testnet-bridge
 cp .env.sepolia.example .env
 ```
@@ -91,9 +88,9 @@ POST /v0/deposit/submit
 GET  /v0/status
 ```
 
-`/demo/*` and the fully clickable `/lab` demo are Anvil-only local helpers in
-the current codebase. They exist for offline walkthroughs and deterministic
-manual demos. App integrations should use `/v0/*`.
+`/demo/*` and the clickable lab UI are Sepolia testnet helpers. They exist for
+walkthroughs and manual demos with funded test keys. App integrations should
+still use `/v0/*`.
 
 ## What This Proves
 
@@ -111,10 +108,10 @@ The 2026-05-15 live run used public Miden testnet plus Sepolia through
 `https://gateway.tenderly.co/public/sepolia`, with public Sepolia tx hashes and
 Miden tx ids recorded in `docs/smoke-test-report.html`.
 
-Published evidence:
+Evidence artifact:
 
 ```text
-https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html
+docs/smoke-test-report.html
 ```
 
 ## Bridge Shape
@@ -363,27 +360,25 @@ cargo fmt --check
 cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
 ```
 
-The Rust `e2e` test target is still useful for regression coverage, but it uses
-the Anvil profile. Treat live Sepolia evidence from `sepolia_e2e` as the public
-testnet validation path.
+The Rust `e2e` test target is still useful for regression coverage. Treat live
+Sepolia evidence from `sepolia_e2e` as the public testnet validation path.
 
-## Local Anvil Fallback
+## Local Sepolia Lab
 
-For offline demos:
+For the clickable lab:
 
 ```bash
-cp .env.anvil.example .env
+cp .env.sepolia.example .env
 make sandbox
 ```
 
 Open:
 
 ```text
-http://localhost:8080/lab
+http://localhost:3000
 ```
 
-Full Anvil instructions are in
-[`docs/anvil/local-sandbox.md`](docs/anvil/local-sandbox.md).
+The bridge still serves the legacy static helper at `http://localhost:8080/lab`.
 
 ## Local-Node Mode
 

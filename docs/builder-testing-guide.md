@@ -14,10 +14,6 @@ Use this path when you want an app, script, or agent to exercise the same
 quote/deposit/status shape it will use against a hosted 1Click service while
 producing public testnet evidence.
 
-The local Anvil sandbox still exists for offline UI demos and regression work,
-but it is not the default guide path. See
-[`docs/anvil/local-sandbox.md`](anvil/local-sandbox.md) for that profile.
-
 ## What You Will Run
 
 By the end of this guide you will have:
@@ -36,8 +32,8 @@ POST /v0/deposit/submit
 GET  /v0/status
 ```
 
-`/demo/*` and the fully clickable `/lab` demo are Anvil-only local helpers in
-the current codebase. Do not make a third-party app depend on them.
+`/demo/*` and the fully clickable lab UI are Sepolia testnet helpers for local
+walkthroughs. Do not make a third-party app depend on them.
 
 ## Mental Model
 
@@ -126,7 +122,7 @@ testnet and the native Miden remote prover configuration.
 Clone the repo:
 
 ```bash
-git clone https://github.com/BrianSeong99/miden-testnet-bridge.git
+git clone <repo-url>
 cd miden-testnet-bridge
 ```
 
@@ -387,7 +383,7 @@ hashes, Miden tx ids, and balance delta. Keep those lines when sharing evidence.
 Current public testnet report:
 
 ```text
-https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html
+docs/smoke-test-report.html
 ```
 
 ## Agent Runbook
@@ -522,6 +518,5 @@ For tighter local testing, replace `*` with your app origin.
 - `AGENT.md`: compatibility startup guide for agents that look for singular
   filenames.
 - `docs/RUNBOOK.md`: operator recovery procedures.
-- `docs/anvil/local-sandbox.md`: local Anvil-only demo profile.
 - `docs/smoke-test-report.html`: published Sepolia evidence page.
 - `docs/openapi.yaml`: 1Click-shaped API schema vendored for this mock.

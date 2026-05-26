@@ -28,7 +28,7 @@ pub async fn withdrawals(
 ) -> Result<Json<WithdrawalsResponse>, ApiError> {
     let Query(_query) = query.map_err(ApiError::from_query_rejection)?;
     Ok(Json(WithdrawalsResponse {
-        asset: "eth-anvil:eth".to_owned(),
+        asset: "eth-sepolia:eth".to_owned(),
         recipient: String::new(),
         affiliate_recipient: String::new(),
         withdrawals: Vec::new(),

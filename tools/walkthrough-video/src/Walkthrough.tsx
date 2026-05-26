@@ -254,7 +254,7 @@ const SetupTerminal: React.FC = () => (
     <Terminal
       title="Terminal"
       lines={[
-        "git clone https://github.com/BrianSeong99/miden-testnet-bridge.git",
+        "git clone <repo-url>",
         "cd miden-testnet-bridge",
         "cp .env.sepolia.example .env",
         "perl -0pi -e \"s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/\" .env",
@@ -272,7 +272,7 @@ const ApiSurface: React.FC = () => (
     <SceneHeader
       eyebrow="Integration contract"
       title="Apps depend on the 1Click-shaped /v0 API, not the demo helpers"
-      subtitle="/demo/* and /lab are Anvil-only local helpers. Sepolia builders use /v0/*."
+      subtitle="/demo/* and /lab are Sepolia testnet helpers. Builder integrations use /v0/*."
     />
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32, marginTop: 42 }}>
       <Endpoint method="GET" path="/v0/tokens" note="Discover supported asset ids" />
@@ -577,12 +577,12 @@ const Closing: React.FC = () => (
       <Terminal
         title="Links"
         lines={[
-          "https://github.com/BrianSeong99/miden-testnet-bridge",
+          "<repo-url>",
           "docs/builder-testing-guide.md",
           "docs/smoke-test-report.html",
           "",
           "Default: Sepolia + public Miden testnet",
-          "Fallback: docs/anvil/local-sandbox.md",
+          "Evidence: docs/smoke-test-report.html",
         ]}
       />
     </div>

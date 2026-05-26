@@ -3,7 +3,9 @@ target/
 .live-sepolia-e2e/
 *.log
 .DS_Store
+*.tsbuildinfo
 node_modules/
+frontend/.next/
 tools/walkthrough-video/out/
 tools/walkthrough-video/public/assets/
 tools/walkthrough-video/recordings/

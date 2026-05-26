@@ -54,7 +54,7 @@ impl AppState {
             miden_master_seed: None,
             demo_enabled: false,
             ui_enabled: false,
-            runtime_profile: "anvil".to_owned(),
+            runtime_profile: "sepolia".to_owned(),
         }
     }
 
@@ -69,7 +69,7 @@ impl AppState {
             miden_master_seed: None,
             demo_enabled: false,
             ui_enabled: false,
-            runtime_profile: "anvil".to_owned(),
+            runtime_profile: "sepolia".to_owned(),
         }
     }
 
@@ -90,7 +90,7 @@ impl AppState {
             miden_master_seed: Some(miden_master_seed),
             demo_enabled: false,
             ui_enabled: false,
-            runtime_profile: "anvil".to_owned(),
+            runtime_profile: "sepolia".to_owned(),
         }
     }
 

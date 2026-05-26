@@ -7,11 +7,8 @@
 All commands assume you are at the repo root. The default operator path is:
 
 ```text
-compose.sepolia.yaml + Sepolia native ETH + public Miden testnet
+compose.yaml + Sepolia native ETH + public Miden testnet
 ```
-
-For local Anvil-only troubleshooting, use
-[`anvil/local-sandbox.md`](anvil/local-sandbox.md).
 
 ## Start Sepolia Profile
 

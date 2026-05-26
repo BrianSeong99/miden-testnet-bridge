@@ -5,7 +5,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::{Provider, ProviderBuilder},
     rpc::types::eth::TransactionRequest,
-    signers::local::PrivateKeySigner,
+    signers::{Signer, local::PrivateKeySigner},
 };
 use axum::{
     Json,
@@ -35,16 +35,18 @@ use crate::{
         miden_bootstrap::{bootstrap_state_from_record, sync_with_retry, wait_for_tx},
         miden_bridge_note::{BridgeOutDepositMemo, build_bridge_out_note},
         miden_deposit_account::build_wallet_account,
+        profile::BridgeProfile,
     },
-    core::state::{LifecycleEventRecord, QuoteRecord},
+    core::{
+        lifecycle::LifecycleEvent,
+        state::{LifecycleEventRecord, QuoteRecord},
+    },
     now_iso8601,
     types::{
         DepositMode, DepositType, QuoteRequest, QuoteResponse, RecipientType, RefundType, SwapType,
     },
 };
 
-const DEFAULT_ANVIL_FUNDED_PRIVATE_KEY: &str =
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const DEFAULT_DEMO_EVM_RECIPIENT: &str = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
 const DEFAULT_DEMO_AMOUNT: &str = "1000000000000";
 
@@ -227,6 +229,7 @@ pub async fn start_inbound(
         .amount
         .unwrap_or_else(|| DEFAULT_DEMO_AMOUNT.to_owned());
     let asset = request.asset.unwrap_or_else(|| "eth".to_owned());
+    let evm_asset_prefix = demo_evm_asset_prefix(&state)?;
     let miden = miden_client(&state)?;
     let wallet = create_demo_wallet(miden.clone(), "inbound-recipient").await?;
     let recipient = request.recipient.unwrap_or_else(|| wallet.address.clone());
@@ -236,7 +239,7 @@ pub async fn start_inbound(
     let quote = create_quote(
         &state,
         quote_request(
-            &format!("eth-anvil:{asset}"),
+            &format!("{evm_asset_prefix}:{asset}"),
             &format!("miden-testnet:{asset}"),
             &amount,
             &recipient,
@@ -251,6 +254,7 @@ pub async fn start_inbound(
         .ok_or_else(|| ApiError::internal("quote did not include deposit address"))?;
     let tx_hash = send_native_deposit(deposit_address, &amount).await?;
     let correlation_id = parse_correlation_id(&quote)?;
+    record_demo_deposit(&state, correlation_id, &tx_hash).await?;
     let flow = flow_response(&state, correlation_id).await?;
 
     Ok(Json(DemoInboundStartResponse {
@@ -290,6 +294,7 @@ pub async fn fund_outbound(
         .amount
         .unwrap_or_else(|| DEFAULT_DEMO_AMOUNT.to_owned());
     let asset = request.asset.unwrap_or_else(|| "eth".to_owned());
+    let evm_asset_prefix = demo_evm_asset_prefix(&state)?;
     let miden = miden_client(&state)?;
     let wallet = create_demo_wallet(miden, "outbound-sender").await?;
     let recipient = wallet.address.clone();
@@ -299,7 +304,7 @@ pub async fn fund_outbound(
     let quote = create_quote(
         &state,
         quote_request(
-            &format!("eth-anvil:{asset}"),
+            &format!("{evm_asset_prefix}:{asset}"),
             &format!("miden-testnet:{asset}"),
             &amount,
             &recipient,
@@ -314,6 +319,7 @@ pub async fn fund_outbound(
         .ok_or_else(|| ApiError::internal("quote did not include deposit address"))?;
     let tx_hash = send_native_deposit(deposit_address, &amount).await?;
     let correlation_id = parse_correlation_id(&quote)?;
+    record_demo_deposit(&state, correlation_id, &tx_hash).await?;
     let flow = flow_response(&state, correlation_id).await?;
 
     Ok(Json(DemoOutboundFundResponse {
@@ -337,6 +343,7 @@ pub async fn submit_outbound(
         .parse::<u64>()
         .map_err(|error| ApiError::bad_request(format!("invalid amount: {error}")))?;
     let asset = request.asset.unwrap_or_else(|| "eth".to_owned());
+    let evm_asset_prefix = demo_evm_asset_prefix(&state)?;
     let miden = miden_client(&state)?;
     let sender_id = parse_account_id(&request.sender_account_id)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -354,7 +361,7 @@ pub async fn submit_outbound(
         &state,
         quote_request(
             &format!("miden-testnet:{asset}"),
-            &format!("eth-anvil:{asset}"),
+            &format!("{evm_asset_prefix}:{asset}"),
             &amount,
             &recipient,
             &refund_to,
@@ -391,13 +398,24 @@ fn ensure_demo_enabled(state: &AppState) -> Result<(), ApiError> {
         Err(ApiError::bad_request(
             "demo endpoints are disabled; set BRIDGE_DEMO_ENABLED=1",
         ))
-    } else if state.runtime_profile != "anvil" {
+    } else if state.runtime_profile != "sepolia" {
         Err(ApiError::bad_request(
-            "demo endpoints only support BRIDGE_PROFILE=anvil",
+            "demo endpoints only support BRIDGE_PROFILE=sepolia",
         ))
     } else {
         Ok(())
     }
+}
+
+fn demo_evm_asset_prefix(state: &AppState) -> Result<&'static str, ApiError> {
+    let profile = BridgeProfile::from_str(&state.runtime_profile)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if profile != BridgeProfile::Sepolia {
+        return Err(ApiError::bad_request(
+            "demo endpoints only support BRIDGE_PROFILE=sepolia",
+        ));
+    }
+    Ok(profile.evm_asset_prefix())
 }
 
 fn miden_client(state: &AppState) -> Result<MidenClient, ApiError> {
@@ -446,20 +464,25 @@ fn parse_correlation_id(quote: &QuoteResponse) -> Result<Uuid, ApiError> {
 }
 
 async fn send_native_deposit(to: &str, amount: &str) -> Result<String, ApiError> {
-    let private_key = env::var("DEMO_EVM_FUNDED_PRIVATE_KEY")
-        .unwrap_or_else(|_| DEFAULT_ANVIL_FUNDED_PRIVATE_KEY.to_owned());
-    let rpc_url = env::var("EVM_RPC_URL").unwrap_or_else(|_| "http://anvil:8545".to_owned());
+    let private_key = required_env("DEMO_EVM_FUNDED_PRIVATE_KEY")?;
+    let rpc_url = required_env("EVM_RPC_URL")?;
+    let chain_id = env::var("EVM_CHAIN_ID")
+        .unwrap_or_else(|_| "11155111".to_owned())
+        .parse::<u64>()
+        .map_err(|error| ApiError::internal(format!("invalid EVM_CHAIN_ID: {error}")))?;
     let amount = amount
         .parse::<u128>()
         .map_err(|error| ApiError::bad_request(format!("invalid amount: {error}")))?;
     let signer: PrivateKeySigner = private_key.parse().map_err(|error| {
         ApiError::internal(format!("invalid DEMO_EVM_FUNDED_PRIVATE_KEY: {error}"))
     })?;
-    let provider = ProviderBuilder::new().wallet(signer).connect_http(
-        rpc_url
-            .parse()
-            .map_err(|error| ApiError::internal(format!("invalid EVM_RPC_URL: {error}")))?,
-    );
+    let provider = ProviderBuilder::new()
+        .wallet(signer.with_chain_id(Some(chain_id)))
+        .connect_http(
+            rpc_url
+                .parse()
+                .map_err(|error| ApiError::internal(format!("invalid EVM_RPC_URL: {error}")))?,
+        );
     let pending = provider
         .send_transaction(
             TransactionRequest::default()
@@ -477,6 +500,31 @@ async fn send_native_deposit(to: &str, amount: &str) -> Result<String, ApiError>
         .await
         .map_err(|error| ApiError::internal(format!("failed waiting for demo deposit: {error}")))?;
     Ok(tx_hash)
+}
+
+fn required_env(name: &str) -> Result<String, ApiError> {
+    env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| ApiError::internal(format!("{name} must be set for Sepolia demo flows")))
+}
+
+async fn record_demo_deposit(
+    state: &AppState,
+    correlation_id: Uuid,
+    tx_hash: &str,
+) -> Result<(), ApiError> {
+    let lifecycle = state
+        .lifecycle
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("lifecycle is not configured"))?;
+    lifecycle
+        .apply(LifecycleEvent::EvmDepositDetected {
+            correlation_id,
+            tx_hash: tx_hash.to_owned(),
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
 async fn create_demo_wallet(client: MidenClient, label: &str) -> Result<DemoWallet, ApiError> {

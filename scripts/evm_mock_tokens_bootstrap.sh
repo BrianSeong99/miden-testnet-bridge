@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RPC_URL="${RPC_URL:-http://anvil:8545}"
+RPC_URL="${RPC_URL:?RPC_URL is required}"
 STATE_DIR="${STATE_DIR:-/state}"
 TOKEN_FILE="${STATE_DIR}/token-addresses.json"
 BOOTSTRAP_PRIVATE_KEY="${BOOTSTRAP_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
@@ -89,5 +89,4 @@ forge create "${PROJECT_ROOT}/contracts/MockERC20.sol:MockERC20" \
   --constructor-args "Mock Bitcoin" "BTC" 8 "${BTC_SUPPLY}" >/dev/null
 
 fund_solver
-
 write_token_file

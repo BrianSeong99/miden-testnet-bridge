@@ -57,20 +57,20 @@ POST /v0/deposit/submit
 GET  /v0/status
 ```
 
-`/demo/*` and the fully clickable `/lab` demo are Anvil-only local helpers in
-the current codebase. Do not make app integrations depend on them.
+`/demo/*` and the clickable lab UI are Sepolia testnet helpers for manual
+walkthroughs. Do not make app integrations depend on demo-only endpoints.
 
-## Anvil Fallback
+## Local Lab
 
-Use Anvil only for local demos and deterministic regression behavior:
+Use the Dockerized Sepolia lab for manual demos:
 
 ```bash
-cp .env.anvil.example .env
+cp .env.sepolia.example .env
+perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
 make sandbox
-open http://localhost:8080/lab
 ```
 
-Full fallback guide: `docs/anvil/local-sandbox.md`.
+Open the HomeLab route or the configured lab UI URL.
 
 ## Evidence Rules
 

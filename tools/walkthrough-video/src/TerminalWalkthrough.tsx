@@ -447,7 +447,7 @@ const TerminalWindow: React.FC<{
           <span style={{ ...styles.dot, background: "#5abf79" }} />
         </div>
         <span style={styles.terminalTitle}>
-          brian@miden-testnet-bridge:~/miden-testnet-bridge
+          builder@miden-testnet-bridge:~/miden-testnet-bridge
         </span>
       </div>
       <pre style={styles.command}>

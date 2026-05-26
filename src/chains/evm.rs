@@ -487,11 +487,8 @@ impl EvmClient {
     }
 
     fn deposit_scan_start(&self, latest_block: u64) -> Option<u64> {
-        match (self.profile, self.deposit_scan_lookback_blocks) {
-            (BridgeProfile::Anvil, None) => Some(0),
-            (_, Some(lookback)) => Some(latest_block.saturating_sub(lookback)),
-            _ => None,
-        }
+        self.deposit_scan_lookback_blocks
+            .map(|lookback| latest_block.saturating_sub(lookback))
     }
 
     async fn handle_detected_deposit(

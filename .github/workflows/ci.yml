@@ -3,26 +3,9 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  changes:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    outputs:
-      e2e: ${{ steps.filter.outputs.e2e }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            e2e:
-              - 'tests/e2e/**'
-              - 'compose.yaml'
-              - 'Dockerfile.miden-node'
-              - 'scripts/**'
-              - 'src/chains/**'
-
   rust:
     runs-on: ubuntu-latest
 
@@ -41,8 +24,7 @@ jobs:
         run: cargo test --locked --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
 
   e2e:
-    if: github.event_name == 'pull_request' && needs.changes.outputs.e2e == 'true'
-    needs: changes
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -53,6 +35,11 @@ jobs:
         run: make e2e
         env:
           RUN_E2E: "1"
+          EVM_RPC_URL: ${{ secrets.SEPOLIA_EVM_RPC_URL }}
+          EVM_CHAIN_ID: "11155111"
+          SOLVER_PRIVATE_KEY: ${{ secrets.SEPOLIA_SOLVER_PRIVATE_KEY }}
+          DEMO_EVM_FUNDED_PRIVATE_KEY: ${{ secrets.SEPOLIA_DEMO_EVM_FUNDED_PRIVATE_KEY }}
+          MIDEN_MASTER_SEED_HEX: ${{ secrets.MIDEN_MASTER_SEED_HEX }}
       - name: Capture bridge logs
         if: failure()
         run: docker compose logs bridge > bridge.log || true

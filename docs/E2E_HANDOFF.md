@@ -1,72 +1,37 @@
-# E2E Handoff - Mock 1Click Sepolia + Miden Testnet Sandbox
+# E2E Handoff - Sepolia + Miden Testnet Sandbox
 
-Snapshot: 2026-05-15.
+Snapshot: 2026-05-26.
 
-This handoff includes historical Anvil evidence because the local demo profile
-was built first. Builder-facing documentation now defaults to Sepolia native ETH
-plus public Miden testnet. Treat Anvil sections in this file as local fallback
-context only; the current tutorial is [`builder-testing-guide.md`](./builder-testing-guide.md).
+This handoff describes the current acceptance path only: Sepolia native ETH plus
+public Miden testnet. Local EVM profiles are not part of the product path.
 
 ## Current Status
 
-- Repo: `BrianSeong99/miden-testnet-bridge`
-- Branch: `main`
-- Product shape: mock NEAR Intents 1Click builder sandbox. Third-party apps
-  should integrate against `/v0/tokens`, `/v0/quote`,
-  `/v0/deposit/submit`, and `/v0/status`; `/demo/*` and `/lab` are local
-  sandbox helpers only.
-- Accepted Miden path: public Miden testnet at `https://rpc.testnet.miden.io`
-- Default EVM path: live Sepolia native ETH
-- Local fallback EVM path: Anvil, documented under `docs/anvil/`
-- Sepolia validation: profile-aware `eth-sepolia:*` assets, native ETH quote
-  support, Sepolia-only Compose target, and `/v0/deposit/submit` tx-hash
-  confirmation are implemented and live-validated for both directions.
-- Local Miden node: legacy fallback only, not the acceptance path
-- Full serialized Anvil regression E2E from the Sepolia-readiness run:
-  `5 passed; 0 failed; finished in 934.77s`
-- Local Anvil sandbox smoke from this branch: inbound click/CLI flow, recipient
-  claim, outbound funding, outbound public-note submit, and local release all
-  reached `SUCCESS`.
-- Non-E2E regression set: green for `lib`, `evm`, `hardening`, `lifecycle`, `miden_bridge`, `miden_node`, `state`
-- Static evidence page: [`docs/smoke-test-report.html`](./smoke-test-report.html)
-- GitHub Pages URL: `https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html`
+- Product shape: mock NEAR Intents 1Click builder sandbox.
+- API surface: `/v0/tokens`, `/v0/quote`, `/v0/deposit/submit`, `/v0/status`.
+- Demo surface: `/demo/*` and `/lab`, backed by Sepolia testnet.
+- Accepted Miden path: public Miden testnet at `https://rpc.testnet.miden.io`.
+- Accepted EVM path: live Sepolia native ETH.
+- Local Miden node: legacy/manual only, not acceptance evidence.
+- Frontend: Next.js lab UI in `frontend/`, served by the `lab-ui` Docker
+  service.
+- Static evidence page: [`docs/smoke-test-report.html`](./smoke-test-report.html).
 
-The old per-quote Miden account design is no longer the plan. Miden-origin deposits use public programmable notes. The bridge consumes a valid `BridgeOutV1` note with a stable bridge account and releases on the destination chain after the Miden consume tx is confirmed.
-
-## Reference Takeaways
-
-Reviewed against:
-
-- `0xMiden/agentic-template`
-- `0xMiden/agent-tools`
-- `0xMiden/protocol`
-
-Design rules we are following:
-
-- Use native Miden client network constructors. Testnet should go through `ClientBuilder::for_testnet()` semantics, not hand-assembled local-node defaults.
-- Sync before account reads, note reads, transaction construction, and post-submit confirmation checks.
-- Treat notes as the native Miden communication primitive. A two-party transfer is at least two transactions: create note, then consume note.
-- Use `NoteType::Public` when the bridge needs discoverability. Public still requires a transaction/proof; it is not an instant off-chain message.
-- Use durable tx ids as the recovery artifact. An idempotency key without a tx id is only evidence that work began, not evidence that a transaction was safely submitted.
+The old per-quote Miden account design is no longer the plan. Miden-origin
+deposits use public programmable notes. The bridge consumes a valid
+`BridgeOutV1` note with a stable bridge account and releases on Sepolia after
+the Miden consume tx is confirmed.
 
 ## Runtime Shape
 
 Default builder profile:
 
-- `compose.sepolia.yaml`
+- `compose.yaml`
 - `bridge`
+- `lab-ui`
 - `postgres`
 - public Sepolia native ETH through `EVM_RPC_URL`
 - public Miden testnet through `MIDEN_RPC_URL`
-
-Local Anvil fallback Compose runs:
-
-- `bridge`
-- `postgres`
-- `anvil`
-- `anvil-init`
-
-It does not start `miden-node` unless a caller explicitly uses the legacy `local-node` profile.
 
 Important env:
 
@@ -76,38 +41,54 @@ MIDEN_MASTER_SEED_HEX=<unique 32-byte hex seed>
 MIDEN_REMOTE_PROVER_URL=        # optional override; native testnet defaults work
 MIDEN_REMOTE_PROVER_TIMEOUT_SECS=180
 BRIDGE_PROFILE=sepolia
-BRIDGE_DEMO_ENABLED=0
-BRIDGE_PRICER=mock              # E2E harness only
+BRIDGE_DEMO_ENABLED=1
+BRIDGE_PRICER=mock              # local evidence harness only
+EVM_RPC_URL=https://gateway.tenderly.co/public/sepolia
+EVM_CHAIN_ID=11155111
 EVM_REQUIRED_CONFIRMATIONS=2
 EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS=
+SOLVER_PRIVATE_KEY=<funded-sepolia-solver-private-key>
+DEMO_EVM_FUNDED_PRIVATE_KEY=<funded-sepolia-test-user-private-key>
 ```
 
-The E2E harness now injects a unique `MIDEN_MASTER_SEED_HEX` per test and Compose forwards it into the bridge container. This matters on public testnet: reusing the default seed reused the same solver account and produced `incorrect account initial commitment` failures after the first run advanced that account on-chain.
+Sepolia mode does not scan from genesis. The bridge waits for
+`/v0/deposit/submit`, then verifies the submitted tx hash pays the quoted
+deposit address and has the configured confirmation depth. This avoids
+RPC-heavy chain-history scans on public Sepolia.
 
-Sepolia profile:
+## Start The Stack
 
 ```bash
 cp .env.sepolia.example .env
-# Fill EVM_RPC_URL, MASTER_MNEMONIC, SOLVER_PRIVATE_KEY, and a fresh MIDEN_MASTER_SEED_HEX.
+perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
+# Fill EVM_RPC_URL, MASTER_MNEMONIC, SOLVER_PRIVATE_KEY, and DEMO_EVM_FUNDED_PRIVATE_KEY.
 make sepolia
-./bin/bridgectl quote inbound --asset eth --recipient <miden-address> --refund-to <sepolia-address>
 ```
 
-In Sepolia mode, leave `EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS` empty. The bridge
-waits for `/v0/deposit/submit`, then verifies the submitted tx hash pays the
-quoted deposit address and has the configured confirmation depth. This avoids
-RPC-heavy chain-history scans on public Sepolia.
+Useful checks:
 
-Live Sepolia E2E:
+```bash
+curl -fsS http://localhost:8080/healthz
+curl -fsS http://localhost:8080/readyz
+curl -fsS http://localhost:3000/health
+./bin/bridgectl status
+./bin/bridgectl tokens
+```
+
+## Live Sepolia Evidence
 
 ```bash
 RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2>&1 | tee sepolia-e2e-live.log
 ```
 
 The runner reads `.env`, uses the mock 1Click `/v0/*` endpoints, and does not
-print private keys. It needs a funded `SOLVER_PRIVATE_KEY`, funded
-`DEMO_EVM_FUNDED_PRIVATE_KEY`, Sepolia RPC URL, public Miden testnet RPC, and
-host access to the Compose Postgres port.
+print private keys. It needs:
+
+- a funded `SOLVER_PRIVATE_KEY`
+- a funded `DEMO_EVM_FUNDED_PRIVATE_KEY`
+- Sepolia RPC URL
+- public Miden testnet RPC
+- host access to the Compose Postgres port
 
 Live Sepolia evidence from 2026-05-15:
 
@@ -116,78 +97,28 @@ SEPOLIA_E2E_EVIDENCE inbound correlation_id=3e5ec16b-2fa2-4c0a-8ce7-0ae8725bbac1
 SEPOLIA_E2E_EVIDENCE outbound funding_correlation_id=8b1920ef-ca3b-4fbc-82c5-35f6f8670332 outbound_correlation_id=ab2b3f5d-0d5e-4b86-a013-0f4ddcef05aa funding_evm_deposit_tx_hash=0x3c0e444fa726496ee09cda9c72d2d14d8a07235de81bdf8de94d0a559c899644 bridge_out_note_tx_id=0xe9db64f8a00db3527ebb1f5d443c09ce2ec80c639ccabd7e5b4b6195ea045f2d miden_consume_tx_ids=["0xbaa1789bb950b97bb8300aaebc53e817760f4791ce04b5d971b85f69e4577f81"] evm_release_tx_hashes=["0x23640d4ad68277a065fa6ec70cc26b6bc7d2acf181bf0b6669da1b03fa668885"] balance_delta_wei=1000000000000
 ```
 
-## Local Anvil Sandbox Smoke
-
-The branch adds a one-command builder path:
-
-```bash
-cp .env.anvil.example .env
-make sandbox
-open http://localhost:8080/lab
-./bin/bridgectl status
-```
-
-Runtime evidence from 2026-05-11:
-
-```text
-/healthz = 200 ok
-/readyz = 200 ready
-/demo/info: nearIntentsMock=true, runtimeProfile=anvil
-tokens: eth-anvil:{eth,usdc,usdt,btc}, miden-testnet:{eth,usdc,usdt,btc}
-```
-
-Inbound click/CLI smoke:
-
-```text
-correlation_id=038088e0-c9bd-421d-909a-2b06adbbb038
-recipient_account_id=0x9ead4197c4ac0b805d293f53a288e0
-evm_deposit_tx=0x584c214334a5b01a0ecbd60b682c63332002185699a6b710ed54a0245a3e6990
-miden_mint_tx=0x596419a82c59e174d7ee8b372079a6cb84d0be6395215bc6b13439757c08030c
-claim_tx=0xc987caf66e7030b44227feed0abe7c897065a0c43ca9dadebf6d79a2f6d191dc
-final_status=SUCCESS
-```
-
-Outbound click/CLI smoke:
-
-```text
-funding_correlation_id=933539eb-6da1-445e-a264-1170ff230ecc
-outbound_correlation_id=1c1c3191-8a9f-44e5-bfbb-a99c0a91d349
-public_bridge_note_tx=0x96c5e5efe76c4b5877e64ebf67e7ee8ee7db6165ef3159fa3b232098bdeaf8bb
-solver_consume_tx=0xa6b0f520e19c4f318df7f9171d2ceba3b70b21847edf942e027c7d308f912b2a
-evm_release_tx=0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b
-final_status=SUCCESS
-```
-
-## Flow: Inbound EVM To Miden
+## Flow: Inbound Sepolia To Miden
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant Anvil
+    participant Sepolia
     participant BridgeAPI as Bridge API
     participant MidenTestnet
     participant Recipient
 
-    User->>BridgeAPI: POST /v0/quote eth-anvil:eth -> miden-testnet:eth
-    BridgeAPI-->>User: EVM depositAddress
-    User->>Anvil: send ETH to depositAddress
-    BridgeAPI->>Anvil: detect and confirm deposit
+    User->>BridgeAPI: POST /v0/quote eth-sepolia:eth -> miden-testnet:eth
+    BridgeAPI-->>User: Sepolia depositAddress
+    User->>Sepolia: send native ETH to depositAddress
+    User->>BridgeAPI: POST /v0/deposit/submit with tx hash
+    BridgeAPI->>Sepolia: verify recipient, value, receipt, confirmations
     BridgeAPI->>BridgeAPI: KNOWN_DEPOSIT_TX -> PENDING_DEPOSIT -> PROCESSING
     BridgeAPI->>MidenTestnet: submit solver-signed public P2ID mint to recipient
-    MidenTestnet-->>BridgeAPI: public P2ID note committed and consumable
     BridgeAPI->>BridgeAPI: append miden_mint_tx_id and mark quote SUCCESS
-    Recipient->>MidenTestnet: sync public note targeted to recipient account
-    Recipient->>MidenTestnet: consume and claim P2ID note
-    MidenTestnet-->>Recipient: recipient balance updated
+    Recipient->>MidenTestnet: consume public note
 ```
 
-Evidence from full suite:
-
-```text
-E2E_EVIDENCE inbound correlation_id=3cbab06b-e388-46c2-a2eb-56e9c64ece10 evm_deposit_tx_hashes=["0x136cc1b31bba44984326d08940299c4d9788d5868f497e56d566735bedbc2fdd"] miden_mint_tx_ids=["0x07a9060a690f11da8f08fff2cf2af6666abc6a026f6be6c369ab9431c7f2a64e"] consumable_note_count=1
-```
-
-## Flow: Outbound Miden To EVM
+## Flow: Outbound Miden To Sepolia
 
 ```mermaid
 sequenceDiagram
@@ -195,23 +126,16 @@ sequenceDiagram
     participant BridgeAPI as Bridge API
     participant MidenTestnet
     participant BridgePoller
-    participant Anvil
+    participant Sepolia
 
-    UserClient->>BridgeAPI: POST /v0/quote miden-testnet:eth -> eth-anvil:eth
+    UserClient->>BridgeAPI: POST /v0/quote miden-testnet:eth -> eth-sepolia:eth
     BridgeAPI-->>UserClient: stable bridge account + BridgeOutV1 depositMemo
     UserClient->>MidenTestnet: create public BridgeOutV1 note with assets
     BridgePoller->>MidenTestnet: sync public notes
     BridgePoller->>BridgePoller: validate target account, quote hash, faucet, amount
     BridgePoller->>MidenTestnet: consume note with bridge account
-    MidenTestnet-->>BridgePoller: consume tx committed
-    BridgePoller->>Anvil: release ETH to EVM recipient
+    BridgePoller->>Sepolia: release native ETH to EVM recipient
     BridgePoller->>BridgePoller: append consume tx + release tx, mark SUCCESS
-```
-
-Evidence from full suite:
-
-```text
-E2E_EVIDENCE outbound funding_correlation_id=1b3fa7ee-38e1-4e9f-9190-0ae8b24db149 outbound_correlation_id=9b642790-cb2e-4d30-bf76-a94d717dbb6f quote_hash=0x92fa8f84aac528651a0bf71d03c965a92132bad3c3e5e5636ff1945b065f9bb9 miden_consume_tx_ids=["0x52dc5f415da06b36e8f97b90f58a070e6b44e16e828659294bf8010040653c48"] evm_release_tx_hashes=["0x2d9f766f6a66a785d645aff7b9fba1b0ae238a68f695afe5d50e7729fed81c0b"] balance_delta=1000000000000
 ```
 
 ## Flow: Incomplete Deposit
@@ -219,148 +143,42 @@ E2E_EVIDENCE outbound funding_correlation_id=1b3fa7ee-38e1-4e9f-9190-0ae8b24db14
 ```mermaid
 sequenceDiagram
     participant User
-    participant Anvil
+    participant Sepolia
     participant BridgeAPI as Bridge API
 
-    User->>BridgeAPI: quote with minimum expected amount
-    User->>Anvil: send below-minimum deposit
-    BridgeAPI->>Anvil: detect deposit tx
-    BridgeAPI->>BridgeAPI: KNOWN_DEPOSIT_TX -> INCOMPLETE_DEPOSIT
-    BridgeAPI-->>User: status remains spec-shaped
+    User->>BridgeAPI: POST /v0/quote for minimum amount X
+    User->>Sepolia: send less than X to depositAddress
+    User->>BridgeAPI: POST /v0/deposit/submit with tx hash
+    BridgeAPI->>Sepolia: verify tx
+    BridgeAPI->>BridgeAPI: mark quote INCOMPLETE_DEPOSIT
 ```
 
-Evidence from full suite:
-
-```text
-E2E_EVIDENCE incomplete correlation_id=70ab6db7-ee8e-4bca-855e-3c2e3ba9d2fe evm_deposit_tx_hashes=["0x1e96fd26e0f3d6efc6175c8ada196889d3d903552f1e4d38471f713de9064b8a"]
-```
-
-## Flow: Refund On Slippage
+## Flow: Refund
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant Anvil
+    participant Sepolia
     participant BridgeAPI as Bridge API
 
-    User->>BridgeAPI: quote
-    User->>Anvil: deposit ETH
-    BridgeAPI->>BridgeAPI: forced minAmountOut exceeds requote
-    BridgeAPI->>BridgeAPI: PROCESSING -> REFUNDED
-    BridgeAPI->>Anvil: submit refund tx to origin-chain refund address
-    BridgeAPI->>BridgeAPI: append evm_refund_tx_hash
+    User->>BridgeAPI: POST /v0/quote with strict slippage
+    User->>Sepolia: send native ETH to depositAddress
+    User->>BridgeAPI: POST /v0/deposit/submit with tx hash
+    BridgeAPI->>BridgeAPI: slippage check fails
+    BridgeAPI->>Sepolia: submit refund tx to origin-chain refund address
+    BridgeAPI->>BridgeAPI: append evm_refund_tx_hash and mark REFUNDED
 ```
 
-Evidence from full suite:
+## Validation Checklist
 
-```text
-E2E_EVIDENCE refund correlation_id=0c2f9355-6cd4-4150-b6ce-fe2b50882b0a evm_deposit_tx_hashes=["0xf47218334b0d5908260f0dfc503256bc7a26d5d3efaa117e0ec29a7bfb5eaa20"] evm_refund_tx_hashes=["0xf49feffd1be5d7b9067e354e8c4e445426ed7702fff57af7d2173cdb78bf004c"]
-```
+- `docker compose --env-file .env config --quiet`
+- `cargo fmt --check`
+- `cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state`
+- `cd frontend && npm run typecheck && npm run build`
+- `docker compose -f compose.yaml -f compose.local.yml --env-file .env up -d --build --remove-orphans --wait --wait-timeout 900 lab-ui`
+- `curl -fsS http://localhost:3000/health`
+- `curl -fsS http://localhost:8080/healthz`
+- `curl -fsS http://localhost:8080/v0/tokens | jq '.[].assetId'`
 
-## Flow: Restart/Resume
-
-```mermaid
-sequenceDiagram
-    participant Test
-    participant BridgeRuntime as Bridge runtime
-    participant Postgres
-    participant MidenTestnet
-
-    Test->>BridgeRuntime: create inbound quote and deposit
-    BridgeRuntime->>Postgres: persist PROCESSING
-    Test->>BridgeRuntime: docker compose restart bridge
-    BridgeRuntime->>Postgres: reload non-terminal quote
-    BridgeRuntime->>Postgres: if miden_mint_tx_id exists, wait for it
-    BridgeRuntime->>BridgeRuntime: if stale idempotency key exists without tx id, resubmit
-    BridgeRuntime->>MidenTestnet: submit/confirm solver-signed public P2ID mint
-    BridgeRuntime->>Postgres: append miden_mint_tx_id and mark SUCCESS
-```
-
-The important fix here: a Miden idempotency key without a durable tx id is treated as interrupted pre-durable work. The bridge waits briefly for a tx id, then resubmits instead of exiting.
-
-Evidence from full suite:
-
-```text
-E2E_EVIDENCE restart_resume correlation_id=46e070c8-f6a6-4298-b47a-df76a571604e evm_deposit_tx_hashes=["0xbad3d3f7c012e743bf98beaa64e83a24aa1a73028e34983148469ff33a632a26"] miden_mint_tx_ids=["0x1858d6d3d23d5eb60dee3863577a18c9067157eb6f1e4079864a01ad06eb292b"]
-```
-
-## Validation Commands
-
-Full E2E:
-
-```bash
-RUSTFLAGS='-C debug-assertions=no' RUN_E2E=1 cargo test --test e2e -- --nocapture --test-threads=1
-```
-
-Result:
-
-```text
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 934.77s
-```
-
-Non-E2E regression:
-
-```bash
-cargo test --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
-```
-
-Result:
-
-```text
-35 lib tests passed
-4 evm tests passed
-4 hardening tests passed
-13 lifecycle tests passed
-5 miden_bridge tests passed
-1 miden_node test passed
-8 state tests passed
-```
-
-Formatting:
-
-```bash
-cargo fmt --check
-```
-
-Result: passed.
-
-## What Changed In This Pivot
-
-- `compose.yaml` defaults to Miden testnet and forwards `MIDEN_MASTER_SEED_HEX`.
-- `src/main.rs` standalone default now matches testnet instead of localhost.
-- `MidenClient` uses endpoint-aware native constructors (`for_testnet`, `for_devnet`, `for_localhost`) and supports optional remote prover override.
-- `/v0/quote` returns a `BridgeOutV1` deposit memo for Miden-origin quotes.
-- The outbound monitor validates and consumes public bridge notes instead of deriving per-quote accounts.
-- Inbound Miden payout uses public P2ID notes so a separate client can discover the note.
-- EVM release/refund and Miden mint/consume paths persist tx ids and emit structured evidence logs.
-- Restart/resume tolerates stale pre-durable Miden idempotency keys.
-- `make sepolia` starts the default Sepolia native ETH + public Miden testnet
-  profile after `.env` is filled with testnet-only keys.
-- `make sandbox` starts the local Anvil fallback with a fresh seed when the
-  placeholder is still present.
-- `/lab` provides a clickable UI for the Anvil fallback, embedded Mermaid
-  diagrams, live flow cards, lifecycle events, and selected quote/tx artifacts.
-- `./bin/bridgectl` provides status, quote, demo, flow, log, and reset commands
-  for third-party builders and future agents.
-- `/healthz` is local liveness; `/readyz` includes Miden RPC readiness and may
-  transiently fail during public testnet RPC lag.
-
-## Residual Risks
-
-- Sepolia native ETH is validated, but ERC20 Sepolia assets still need token
-  registry entries and live token-transfer evidence.
-- `RUSTFLAGS='-C debug-assertions=no'` is still required for E2E. Keep this visible; do not hide it behind a green badge.
-- Bootstrapping every E2E test creates fresh public testnet accounts and faucets, so the suite is slow by design.
-- Public notes are intentionally discoverable. This matches Brian's production preference, but quote privacy is not the point of this v0.
-- The stable bridge account is v0. A later network-account consumer can replace it without changing the public-note deposit primitive.
-- Public Sepolia RPCs can rate-limit. The live runner backs off on RPC reads and
-  sends, but a dedicated RPC key is still better for repeated runs.
-
-## Next Milestone
-
-`v0.3` is Sepolia hardening:
-
-1. Add Sepolia ERC20 token registry entries and live ERC20 evidence.
-2. Move repeated runs to a dedicated Sepolia RPC key or paid endpoint.
-3. Keep publishing quote payloads, tx ids, lifecycle rows, bridge logs, and
-   final status responses for every acceptance run.
+The token list should include `eth-sepolia:eth` and Miden testnet assets. It
+should not include any local EVM asset namespace.

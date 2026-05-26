@@ -91,11 +91,47 @@ pub async fn create_solver_wallet(client: &MidenClient, master_seed: &[u8; 32]) 
     let keystore = client.open_keystore()?;
     let mut inner = client.open().await?;
 
-    let init_seed = derive_seed(master_seed, uuid::Uuid::nil(), "miden_solver_account_seed");
-    let auth_seed = derive_seed(master_seed, uuid::Uuid::nil(), "miden_solver_auth_key");
-    let mut rng = StdRng::from_seed(auth_seed);
-    let secret_key = AuthSecretKey::new_falcon512_poseidon2_with_rng(&mut rng);
-    let account = build_wallet_account(init_seed, &secret_key)?;
+    let (account, secret_key) = build_solver_wallet(master_seed)?;
+    let remote_commitment = client.account_commitment(account.id()).await?;
+
+    if let Some(local_account) = inner.get_account(account.id()).await? {
+        if let Some(remote_commitment) = remote_commitment {
+            if !local_account.is_new() && local_account.to_commitment() == remote_commitment {
+                return Ok(local_account);
+            }
+        } else if !local_account.is_new() {
+            return Ok(local_account);
+        }
+    }
+
+    if let Some(remote_commitment) = remote_commitment {
+        let deployed_account = deployed_account_from_new(account)?;
+        if deployed_account.to_commitment() != remote_commitment {
+            return Err(anyhow!(
+                "deterministic solver account {} already exists on Miden, but local state cannot reconstruct commitment {}; use a fresh MIDEN_MASTER_SEED_HEX or restore the matching Miden store",
+                deployed_account.id(),
+                remote_commitment
+            ));
+        }
+
+        if inner.get_account(deployed_account.id()).await?.is_none() {
+            keystore
+                .add_key(&secret_key, deployed_account.id())
+                .await
+                .context("failed to persist solver signing key")?;
+            inner
+                .add_account(&deployed_account, false)
+                .await
+                .context("failed to add deployed solver account to client store")?;
+        } else {
+            inner
+                .add_account(&deployed_account, true)
+                .await
+                .context("failed to refresh deployed solver account in client store")?;
+        }
+
+        return Ok(deployed_account);
+    }
 
     if inner.get_account(account.id()).await?.is_none() {
         keystore
@@ -107,9 +143,29 @@ pub async fn create_solver_wallet(client: &MidenClient, master_seed: &[u8; 32]) 
             .await
             .context("failed to add solver account to client store")?;
     }
+
     ensure_account_deployed(&mut inner, &account).await?;
 
-    Ok(account)
+    inner
+        .get_account(account.id())
+        .await?
+        .ok_or_else(|| anyhow!("solver account {} missing after deployment", account.id()))
+}
+
+fn build_solver_wallet(master_seed: &[u8; 32]) -> Result<(Account, AuthSecretKey)> {
+    let init_seed = derive_seed(master_seed, uuid::Uuid::nil(), "miden_solver_account_seed");
+    let auth_seed = derive_seed(master_seed, uuid::Uuid::nil(), "miden_solver_auth_key");
+    let mut rng = StdRng::from_seed(auth_seed);
+    let secret_key = AuthSecretKey::new_falcon512_poseidon2_with_rng(&mut rng);
+    let account = build_wallet_account(init_seed, &secret_key)?;
+
+    Ok((account, secret_key))
+}
+
+fn deployed_account_from_new(account: Account) -> Result<Account> {
+    let (id, vault, storage, code, _nonce, _seed) = account.into_parts();
+    Account::new(id, vault, storage, code, Felt::new(1), None)
+        .context("failed to reconstruct deployed solver account")
 }
 
 async fn ensure_account_deployed(
@@ -145,10 +201,9 @@ pub async fn bootstrap_miden(
     state_store: DynStateStore,
     master_seed: &[u8; 32],
 ) -> Result<BootstrapState> {
-    let solver = create_solver_wallet(client, master_seed).await?;
-
     if let Some(existing) = state_store.get_miden_bootstrap().await? {
         let state = bootstrap_state_from_record(&existing)?;
+        let (solver, _) = build_solver_wallet(master_seed)?;
         if state.solver_account_id != solver.id() {
             return Err(anyhow!(
                 "persisted solver account {} does not match deterministic solver account {}",
@@ -156,9 +211,12 @@ pub async fn bootstrap_miden(
                 solver.id()
             ));
         }
+        create_solver_wallet(client, master_seed).await?;
         ensure_solver_liquidity(client, &state).await?;
         return Ok(state);
     }
+
+    let solver = create_solver_wallet(client, master_seed).await?;
 
     let mut faucet_ids = Vec::new();
     for (asset_id, symbol) in SUPPORTED_ASSETS {

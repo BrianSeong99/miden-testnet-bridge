@@ -2,7 +2,7 @@
 
 ## Milestone
 
-- Milestone: https://github.com/BrianSeong99/miden-testnet-bridge/milestone/1
+- Milestone: repository milestone 1
 
 ## Public Text Rules
 
@@ -15,15 +15,15 @@
 - Treat this repository as a mock NEAR Intents 1Click builder sandbox. The
   public integration surface should stay aligned with the 1Click flow:
   `/v0/tokens`, `/v0/quote`, optional `/v0/deposit/submit`, `/v0/status`.
-- Treat this as testnet-only infrastructure for local testing, Sepolia, Anvil,
-  and public Miden testnet. Do not present it as a production bridge, a mainnet
+- Treat this as testnet-only infrastructure for local testing, Sepolia, and
+  public Miden testnet. Do not present it as a production bridge, a mainnet
   integration path, or something that should ever handle mainnet funds.
 - `/demo/*` and `/lab` are local sandbox helpers. Do not make third-party app
   integrations depend on demo-only endpoints.
 - Default all builder-facing docs and guides to public Miden testnet at
   `https://rpc.testnet.miden.io` plus Sepolia native ETH.
-- Keep Anvil instructions in `docs/anvil/` or clearly labeled as local-only
-  fallback. `/demo/*` currently supports only `BRIDGE_PROFILE=anvil`.
+- `/demo/*` and `/lab` are Sepolia helpers. Do not reintroduce a local EVM default
+  path unless a task explicitly scopes it as legacy regression-only work.
 - Do not use the local Miden node for acceptance evidence. Local-node mode is a
   legacy/manual fallback only.
 - Use native `miden-client` network behavior for testnet and devnet. Do not
@@ -94,10 +94,10 @@
    test -f .env || cp .env.sepolia.example .env
    perl -0pi -e "s/MIDEN_MASTER_SEED_HEX=.*/MIDEN_MASTER_SEED_HEX=$(openssl rand -hex 32)/" .env
    # Fill Sepolia test keys and RPC before starting.
-   docker compose -f compose.sepolia.yaml --env-file .env down --volumes --remove-orphans
-   docker compose -f compose.sepolia.yaml --env-file .env up -d --build
-   curl -i http://localhost:8080/healthz
-   curl -i http://localhost:8080/readyz
+   docker compose --env-file .env down --volumes --remove-orphans
+   docker compose --env-file .env up -d --build --wait --wait-timeout 900
+   docker compose exec bridge curl -fsS http://127.0.0.1:8080/healthz
+   docker compose exec lab-ui node -e "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1))"
    ```
 
 5. For regression evidence, run:
@@ -122,18 +122,10 @@
    - Miden tx ids
    - EVM tx hashes
    - lifecycle status sequence
-   - whether the EVM side was Sepolia or an explicitly labeled local fallback
+   - confirmation that the EVM side was Sepolia
 
 8. Do not claim Sepolia validation unless the evidence includes live Sepolia tx
    hashes and final status responses for inbound and outbound flows.
-
-9. For Anvil-only local demo fallback:
-
-   ```bash
-   cp .env.anvil.example .env
-   make sandbox
-   open http://localhost:8080/lab
-   ```
 
 ## Review Flow
 

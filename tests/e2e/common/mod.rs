@@ -10,7 +10,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::{Provider, ProviderBuilder},
     rpc::types::eth::TransactionRequest,
-    signers::local::PrivateKeySigner,
+    signers::{Signer, local::PrivateKeySigner},
 };
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use miden_client::{
@@ -217,12 +217,12 @@ impl TestContext {
     ) -> Result<QuoteResponse> {
         let (origin_asset, destination_asset) = match direction {
             Direction::Inbound => (
-                format!("eth-anvil:{asset}"),
+                format!("eth-sepolia:{asset}"),
                 format!("miden-testnet:{asset}"),
             ),
             Direction::Outbound => (
                 format!("miden-testnet:{asset}"),
-                format!("eth-anvil:{asset}"),
+                format!("eth-sepolia:{asset}"),
             ),
         };
         let payload = json!({
@@ -413,7 +413,15 @@ pub fn miden_rpc_url() -> String {
 }
 
 pub fn evm_rpc_url() -> String {
-    std::env::var("EVM_RPC_URL").unwrap_or_else(|_| "http://localhost:8545".to_owned())
+    std::env::var("EVM_RPC_URL")
+        .unwrap_or_else(|_| "https://gateway.tenderly.co/public/sepolia".to_owned())
+}
+
+pub fn evm_chain_id() -> u64 {
+    std::env::var("EVM_CHAIN_ID")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(11155111)
 }
 
 pub fn default_evm_address() -> Address {
@@ -528,20 +536,45 @@ pub async fn poll_status_until(
     }
 }
 
-pub async fn send_native_eth(to: &str, amount: u128) -> Result<()> {
-    let signer: PrivateKeySigner = DEFAULT_FUNDED_PRIVATE_KEY.parse().expect("valid signer");
+pub async fn send_native_eth(to: &str, amount: u128) -> Result<String> {
+    let private_key = std::env::var("DEMO_EVM_FUNDED_PRIVATE_KEY")
+        .unwrap_or_else(|_| DEFAULT_FUNDED_PRIVATE_KEY.to_owned());
+    let signer: PrivateKeySigner = private_key
+        .parse::<PrivateKeySigner>()
+        .context("invalid DEMO_EVM_FUNDED_PRIVATE_KEY")?
+        .with_chain_id(Some(evm_chain_id()));
     let provider = ProviderBuilder::new()
         .wallet(signer)
         .connect_http(evm_rpc_url().parse()?);
-    provider
+    let pending = provider
         .send_transaction(
             TransactionRequest::default()
                 .with_to(Address::from_str(to)?)
                 .with_value(U256::from(amount)),
         )
-        .await?
-        .watch()
         .await?;
+    let tx_hash = format!("{:#x}", pending.tx_hash());
+    pending.watch().await?;
+    submit_deposit_tx(to, &tx_hash).await?;
+    Ok(tx_hash)
+}
+
+async fn submit_deposit_tx(deposit_address: &str, tx_hash: &str) -> Result<()> {
+    let response = reqwest::Client::new()
+        .post(format!("{}/v0/deposit/submit", bridge_url()))
+        .json(&json!({
+            "depositAddress": deposit_address,
+            "txHash": tx_hash,
+        }))
+        .send()
+        .await
+        .context("deposit submit request failed")?;
+    ensure!(
+        response.status().is_success(),
+        "deposit submit failed with {}: {}",
+        response.status(),
+        response.text().await.unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -657,8 +690,6 @@ fn compose_diagnostics(envs: &[(String, String)]) -> String {
             "--tail=300",
             "bridge",
             "postgres",
-            "anvil",
-            "anvil-init",
         ],
         envs,
     );
