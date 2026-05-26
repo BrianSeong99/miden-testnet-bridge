@@ -3,157 +3,188 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Miden Bridge 1Click Mock Lab</title>
+    <title>Miden Bridge Lab</title>
     <link rel="stylesheet" href="/lab/styles.css" />
   </head>
   <body>
     <main class="shell">
-      <header class="masthead">
-        <div>
-          <p class="eyebrow">NEAR Intents 1Click mock</p>
-          <h1>Miden testnet bridge sandbox</h1>
-          <p class="lede">
-            Builder-facing mock API for testing 1Click quote, deposit, status,
-            and settlement flows across Anvil and Miden testnet.
+      <header class="topbar" aria-label="Bridge lab overview">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">1Click-compatible mock</p>
+            <h1>Miden bridge lab</h1>
+          </div>
+        </div>
+        <nav class="endpoint-rail" aria-label="API lifecycle">
+          <span>tokens</span>
+          <span>quote</span>
+          <span>deposit</span>
+          <span>submit</span>
+          <span>status</span>
+        </nav>
+      </header>
+
+      <section class="hero-grid">
+        <div class="hero-copy">
+          <p class="kicker">Builder sandbox</p>
+          <h2>Run Sepolia and Miden settlement flows through the same 1Click surface wallet teams will swap at cutover.</h2>
+          <p>
+            This lab is a company-facing diagnostic console for quote creation,
+            deposit detection, lifecycle tracking, and public-note settlement.
+            It intentionally avoids user-specific accounts or private workspace
+            references.
           </p>
         </div>
-        <aside class="runtime-panel">
-          <div class="runtime-line">
+        <aside class="runtime-matrix" aria-label="Runtime status">
+          <div class="metric">
             <span>API</span>
             <strong id="api-health">checking</strong>
           </div>
-          <div class="runtime-line">
-            <span>Profile</span>
+          <div class="metric">
+            <span>Runtime</span>
             <strong id="runtime-profile">unknown</strong>
           </div>
-          <div class="runtime-line">
-            <span>Demo tools</span>
+          <div class="metric">
+            <span>Demo API</span>
             <strong id="demo-state">unknown</strong>
           </div>
+          <div class="metric">
+            <span>Tokens</span>
+            <strong id="token-count">-</strong>
+          </div>
         </aside>
-      </header>
-
-      <section class="api-strip" aria-label="1Click API flow">
-        <span>GET /v0/tokens</span>
-        <span>POST /v0/quote</span>
-        <span>Origin deposit</span>
-        <span>POST /v0/deposit/submit</span>
-        <span>GET /v0/status</span>
       </section>
 
-      <section class="diagram-panel" aria-label="Flow diagrams">
-        <div class="section-title">
-          <div>
-            <p class="eyebrow">Solution diagrams</p>
-            <h2>Mock 1Click flow</h2>
+      <section class="command-grid" aria-label="Demo commands">
+        <article class="command-card primary-command">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Sepolia to Miden</p>
+              <h3>Inbound P2ID mint</h3>
+            </div>
+            <span class="mode-pill">bridge in</span>
           </div>
-        </div>
-        <div class="diagram-grid">
-          <article class="diagram-card">
-            <h3>Solution overview</h3>
-            <pre class="mermaid">flowchart LR
-    App["Builder app"] --> API["Mock NEAR Intents 1Click API"]
-    API --> V0["/v0/tokens /quote /deposit/submit /status"]
-    API --> Anvil["Anvil EVM"]
-    API --> Miden["Miden public testnet"]
-    Miden --> Notes["Public programmable notes"]
-    Demo["/demo/* + /lab"] -. sandbox helpers .-> API</pre>
-          </article>
-          <article class="diagram-card">
-            <h3>Inbound: Anvil to Miden</h3>
-            <pre class="mermaid">sequenceDiagram
-    participant User
-    participant Anvil
-    participant BridgeAPI as Bridge API
-    participant Miden
-    participant Recipient
-    User->>BridgeAPI: POST /v0/quote eth-anvil:eth -> miden-testnet:eth
-    BridgeAPI-->>User: EVM depositAddress
-    User->>Anvil: Send deposit
-    BridgeAPI->>Anvil: Detect and confirm deposit
-    BridgeAPI->>Miden: Solver account submits public P2ID mint to recipient
-    Miden-->>BridgeAPI: P2ID note committed and consumable
-    BridgeAPI-->>User: GET /v0/status = SUCCESS
-    Recipient->>Miden: Claim public P2ID note
-    Miden-->>Recipient: Wallet balance updated</pre>
-          </article>
-          <article class="diagram-card">
-            <h3>Outbound: Miden to Anvil</h3>
-            <pre class="mermaid">sequenceDiagram
-    participant UserClient
-    participant BridgeAPI as Bridge API
-    participant Miden
-    participant Anvil
-    UserClient->>BridgeAPI: POST /v0/quote miden-testnet:eth -> eth-anvil:eth
-    BridgeAPI-->>UserClient: Stable bridge account + BridgeOutV1 memo
-    UserClient->>Miden: Create public BridgeOutV1 note
-    BridgeAPI->>Miden: Sync and validate public note
-    BridgeAPI->>Miden: Consume note with bridge account
-    BridgeAPI->>Anvil: Release ETH to recipient
-    BridgeAPI-->>UserClient: GET /v0/status = SUCCESS</pre>
-          </article>
-        </div>
-      </section>
-
-      <section class="actions-grid">
-        <article class="action-slab">
-          <div>
-            <p class="eyebrow">Anvil to Miden</p>
-            <h2>Inbound P2ID mint</h2>
-            <p>
-              Requests a 1Click-shaped quote, sends native ETH on Anvil, waits
-              for the bridge to mint a solver-signed public P2ID note on Miden,
-              then lets the recipient claim it.
-            </p>
-          </div>
+          <p>
+            Request a quote, send native ETH on Sepolia, wait for deposit
+            confirmation, then mint a public P2ID note to a Miden recipient.
+          </p>
           <div class="control-row">
             <label>
               Amount
-              <input id="inbound-amount" value="1000000000000" />
+              <input id="inbound-amount" value="1000000000000" inputmode="numeric" />
             </label>
             <button id="start-inbound">Start inbound</button>
             <button id="claim-inbound" class="secondary" disabled>Claim note</button>
           </div>
         </article>
 
-        <article class="action-slab">
-          <div>
-            <p class="eyebrow">Miden to Anvil</p>
-            <h2>Public BridgeOutV1 note</h2>
-            <p>
-              Funds a Miden wallet through the inbound route, then submits a
-              public programmable bridge note. The bridge consumes the note and
-              releases native ETH on Anvil.
-            </p>
+        <article class="command-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Miden to Sepolia</p>
+              <h3>BridgeOutV1 note</h3>
+            </div>
+            <span class="mode-pill">bridge out</span>
           </div>
+          <p>
+            Fund a Miden wallet through the inbound route, create a public
+            bridge note, let the service consume it, and release ETH on Sepolia.
+          </p>
           <div class="control-row">
             <label>
               Amount
-              <input id="outbound-amount" value="1000000000000" />
+              <input id="outbound-amount" value="1000000000000" inputmode="numeric" />
             </label>
-            <button id="fund-outbound">Fund Miden wallet</button>
-            <button id="submit-outbound" class="secondary" disabled>Submit public note</button>
+            <button id="fund-outbound">Fund wallet</button>
+            <button id="submit-outbound" class="secondary" disabled>Submit note</button>
           </div>
         </article>
       </section>
 
       <section id="error-panel" class="error-panel" hidden></section>
 
-      <section class="workspace">
-        <div>
-          <div class="section-title">
-            <p class="eyebrow">Live flows</p>
-            <button id="refresh-flows" class="ghost">Refresh</button>
+      <section class="ops-grid">
+        <div class="flow-column">
+          <div class="section-toolbar">
+            <div>
+              <p class="eyebrow">Live flows</p>
+              <h3>Lifecycle stream</h3>
+            </div>
+            <div class="toolbar-actions">
+              <div class="segmented" role="group" aria-label="Flow filter">
+                <button data-filter="all" class="active">All</button>
+                <button data-filter="active">Active</button>
+                <button data-filter="terminal">Terminal</button>
+              </div>
+              <button id="refresh-flows" class="ghost">Refresh</button>
+            </div>
           </div>
+          <div class="status-strip" id="status-counts" aria-label="Flow status counts"></div>
           <div id="flow-list" class="flow-list"></div>
         </div>
 
         <aside class="artifact-panel">
-          <p class="eyebrow">Selected artifacts</p>
+          <div class="artifact-head">
+            <div>
+              <p class="eyebrow">Inspector</p>
+              <h3>Selected artifacts</h3>
+            </div>
+            <button id="copy-artifacts" class="ghost">Copy</button>
+          </div>
           <pre id="artifact-json">{}</pre>
         </aside>
       </section>
+
+      <section class="diagram-panel" aria-label="Protocol diagrams">
+        <div class="section-toolbar">
+          <div>
+            <p class="eyebrow">Reference</p>
+            <h3>Flow topology</h3>
+          </div>
+        </div>
+        <div class="diagram-grid">
+          <article class="diagram-card">
+            <h4>System overview</h4>
+            <pre class="mermaid">flowchart LR
+    App["Wallet or pioneer app"] --> API["1Click-compatible mock API"]
+    API --> V0["/v0/tokens /quote /deposit/submit /status"]
+    API --> Sepolia["Sepolia"]
+    API --> Miden["Miden runtime"]
+    Miden --> Notes["Public programmable notes"]
+    Lab["/lab diagnostics"] -. controlled helpers .-> API</pre>
+          </article>
+          <article class="diagram-card">
+            <h4>Inbound</h4>
+            <pre class="mermaid">sequenceDiagram
+    participant User
+    participant Sepolia
+    participant BridgeAPI as Bridge API
+    participant Miden
+    User->>BridgeAPI: POST /v0/quote
+    BridgeAPI-->>User: depositAddress
+    User->>Sepolia: Send deposit
+    BridgeAPI->>Sepolia: Submit tx
+    BridgeAPI->>Miden: Solver P2ID note
+    BridgeAPI-->>User: status SUCCESS</pre>
+          </article>
+          <article class="diagram-card">
+            <h4>Outbound</h4>
+            <pre class="mermaid">sequenceDiagram
+    participant User
+    participant Miden
+    participant BridgeAPI as Bridge API
+    participant Sepolia
+    User->>BridgeAPI: POST /v0/quote
+    User->>Miden: Publish BridgeOutV1 note
+    BridgeAPI->>Miden: Validate and consume
+    BridgeAPI->>Sepolia: Release ETH
+    BridgeAPI-->>User: status SUCCESS</pre>
+          </article>
+        </div>
+      </section>
     </main>
+
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
       if (window.mermaid) {

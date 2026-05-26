@@ -277,7 +277,7 @@ mod tests {
             slippage_tolerance: 100.0,
             origin_asset: "miden-testnet:eth".to_owned(),
             deposit_type: DepositType::OriginChain,
-            destination_asset: "eth-anvil:eth".to_owned(),
+            destination_asset: "eth-sepolia:eth".to_owned(),
             amount: "1000".to_owned(),
             refund_to: "0xrefund".to_owned(),
             refund_type: RefundType::OriginChain,

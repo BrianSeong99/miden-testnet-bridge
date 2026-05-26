@@ -130,13 +130,12 @@ async fn evm_asset_prefix(client: &reqwest::Client, base_url: &str) -> Result<St
 
     match env::var("BRIDGE_PROFILE") {
         Ok(profile) => profile_to_evm_asset_prefix(&profile),
-        Err(_) => Ok("eth-anvil".to_owned()),
+        Err(_) => Ok("eth-sepolia".to_owned()),
     }
 }
 
 fn profile_to_evm_asset_prefix(profile: &str) -> Result<String> {
     match profile {
-        "anvil" => Ok("eth-anvil".to_owned()),
         "sepolia" => Ok("eth-sepolia".to_owned()),
         other => bail!("unsupported BRIDGE_PROFILE {other}"),
     }

@@ -81,20 +81,19 @@ impl Config {
                 env::var("MIDEN_STORE_DIR")
                     .unwrap_or_else(|_| "./.miden-store".to_owned()),
             ),
-            miden_master_seed_hex: env::var("MIDEN_MASTER_SEED_HEX").unwrap_or_else(|_| {
-                "0101010101010101010101010101010101010101010101010101010101010101".to_owned()
-            }),
+            miden_master_seed_hex: env::var("MIDEN_MASTER_SEED_HEX")
+                .context("MIDEN_MASTER_SEED_HEX is required")?,
             evm_rpc_url: env::var("EVM_RPC_URL")
-                .unwrap_or_else(|_| "http://host.docker.internal:8545".to_owned()),
+                .unwrap_or_else(|_| "https://gateway.tenderly.co/public/sepolia".to_owned()),
             master_mnemonic: env::var("MASTER_MNEMONIC")
                 .unwrap_or_else(|_| {
                     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
                         .to_owned()
                 }),
             solver_private_key: env::var("SOLVER_PRIVATE_KEY")
-                .unwrap_or_else(|_| "replace-with-solver-private-key".to_owned()),
+                .context("SOLVER_PRIVATE_KEY is required")?,
             evm_chain_id: env::var("EVM_CHAIN_ID")
-                .unwrap_or_else(|_| "271828".to_owned())
+                .unwrap_or_else(|_| "11155111".to_owned())
                 .parse()
                 .context("EVM_CHAIN_ID must be a valid u64")?,
             http_port: env::var("BRIDGE_HTTP_PORT")
@@ -102,9 +101,9 @@ impl Config {
                 .parse()
                 .context("BRIDGE_HTTP_PORT must be a valid u16")?,
             bridge_profile: env::var("BRIDGE_PROFILE")
-                .unwrap_or_else(|_| "anvil".to_owned())
+                .unwrap_or_else(|_| "sepolia".to_owned())
                 .parse()
-                .context("BRIDGE_PROFILE must be anvil or sepolia")?,
+                .context("BRIDGE_PROFILE must be sepolia")?,
             bridge_demo_enabled: parse_bool_env("BRIDGE_DEMO_ENABLED", false)?,
             bridge_ui_enabled: parse_bool_env("BRIDGE_UI_ENABLED", true)?,
             bridge_cors_allow_origin: env::var("BRIDGE_CORS_ALLOW_ORIGIN")

@@ -227,7 +227,7 @@ mod tests {
             "depositMode": "SIMPLE",
             "swapType": "EXACT_INPUT",
             "slippageTolerance": 100.0,
-            "originAsset": "eth-anvil:eth",
+            "originAsset": "eth-sepolia:eth",
             "depositType": "ORIGIN_CHAIN",
             "destinationAsset": "miden-testnet:eth",
             "amount": "1000",
@@ -247,7 +247,7 @@ mod tests {
             "slippageTolerance": 100.0,
             "originAsset": "miden-testnet:eth",
             "depositType": "ORIGIN_CHAIN",
-            "destinationAsset": "eth-anvil:eth",
+            "destinationAsset": "eth-sepolia:eth",
             "amount": "1000",
             "refundTo": "0xrefund",
             "refundType": "ORIGIN_CHAIN",
@@ -400,11 +400,7 @@ mod tests {
             false,
             "sepolia".to_owned(),
         ));
-        let payload = with_override(
-            sample_quote_request(),
-            "originAsset",
-            Value::String("eth-sepolia:eth".to_owned()),
-        );
+        let payload = sample_quote_request();
         let response = app
             .oneshot(
                 Request::post("/v0/quote")
@@ -419,17 +415,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sepolia_profile_rejects_anvil_assets() {
+    async fn sepolia_profile_rejects_non_sepolia_evm_assets() {
         let app = app(AppState::new(memory_state()).with_runtime_options(
             false,
             false,
             "sepolia".to_owned(),
         ));
+        let payload = with_override(
+            sample_quote_request(),
+            "originAsset",
+            Value::String("eth-local:eth".to_owned()),
+        );
         let response = app
             .oneshot(
                 Request::post("/v0/quote")
                     .header("content-type", "application/json")
-                    .body(Body::from(sample_quote_request().to_string()))
+                    .body(Body::from(payload.to_string()))
                     .expect("request"),
             )
             .await
@@ -480,7 +481,7 @@ mod tests {
         assert_eq!(memo.bridge_account_id, bootstrap.solver_account_id);
         assert_eq!(memo.storage.correlation_id, quote.correlation_id);
         assert_eq!(memo.storage.origin_asset, "miden-testnet:eth");
-        assert_eq!(memo.storage.destination_asset, "eth-anvil:eth");
+        assert_eq!(memo.storage.destination_asset, "eth-sepolia:eth");
         assert_eq!(memo.storage.amount_in, "1000");
         assert_eq!(memo.storage.min_amount_out, "1000");
         assert_eq!(memo.storage.destination_recipient, "0xrecipient");

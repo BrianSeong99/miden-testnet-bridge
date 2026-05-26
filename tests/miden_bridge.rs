@@ -197,7 +197,7 @@ async fn outbound_flow_consumes_note_and_releases_on_evm() {
                         "slippageTolerance": 100.0,
                         "originAsset": "miden-testnet:usdc",
                         "depositType": "ORIGIN_CHAIN",
-                        "destinationAsset": "eth-anvil:usdc",
+                        "destinationAsset": "eth-sepolia:usdc",
                         "amount": "1000000",
                         "refundTo": "0xfeed",
                         "refundType": "ORIGIN_CHAIN",
@@ -322,7 +322,7 @@ async fn live_evm_client() -> Option<(
 )> {
     let rpc_url = std::env::var("EVM_RPC_URL").ok()?;
     let temp_dir = tempdir().expect("tempdir");
-    bootstrap_anvil(&rpc_url, temp_dir.path()).await;
+    bootstrap_evm_mock_tokens(&rpc_url, temp_dir.path()).await;
     let token_file = temp_dir.path().join("token-addresses.json");
     let store = memory_state();
     let evm = Arc::new(
@@ -338,7 +338,7 @@ async fn live_evm_client() -> Option<(
                     .ok()
                     .and_then(|value| value.parse().ok())
                     .unwrap_or(271828),
-                profile: BridgeProfile::Anvil,
+                profile: BridgeProfile::Sepolia,
                 required_confirmations: 1,
                 deposit_scan_lookback_blocks: None,
             },
@@ -348,9 +348,9 @@ async fn live_evm_client() -> Option<(
     Some((evm, token_file, temp_dir, store))
 }
 
-async fn bootstrap_anvil(rpc_url: &str, state_dir: &std::path::Path) {
+async fn bootstrap_evm_mock_tokens(rpc_url: &str, state_dir: &std::path::Path) {
     let status = Command::new("bash")
-        .arg("scripts/anvil_bootstrap.sh")
+        .arg("scripts/evm_mock_tokens_bootstrap.sh")
         .env("RPC_URL", rpc_url)
         .env("STATE_DIR", state_dir)
         .env(

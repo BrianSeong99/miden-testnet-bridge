@@ -5,10 +5,6 @@ services:
     build:
       context: .
     depends_on:
-      anvil:
-        condition: service_healthy
-      anvil-init:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       miden-node:
@@ -20,20 +16,20 @@ services:
       MIDEN_REMOTE_PROVER_URL: ${MIDEN_REMOTE_PROVER_URL:-}
       MIDEN_REMOTE_PROVER_TIMEOUT_SECS: ${MIDEN_REMOTE_PROVER_TIMEOUT_SECS:-180}
       MIDEN_STORE_DIR: ${MIDEN_STORE_DIR:-/var/lib/bridge/miden-store}
-      MIDEN_MASTER_SEED_HEX: ${MIDEN_MASTER_SEED_HEX:-0101010101010101010101010101010101010101010101010101010101010101}
-      EVM_RPC_URL: ${EVM_RPC_URL:-http://anvil:8545}
+      MIDEN_MASTER_SEED_HEX: ${MIDEN_MASTER_SEED_HEX:?MIDEN_MASTER_SEED_HEX is required}
+      EVM_RPC_URL: ${EVM_RPC_URL:-https://gateway.tenderly.co/public/sepolia}
       MASTER_MNEMONIC: ${MASTER_MNEMONIC:-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about}
-      SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382dbb7d2745078b2336b91c60d50d6b6d7}
-      EVM_CHAIN_ID: ${EVM_CHAIN_ID:-271828}
+      SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:?SOLVER_PRIVATE_KEY is required}
+      EVM_CHAIN_ID: ${EVM_CHAIN_ID:-11155111}
       EVM_TOKEN_ADDRESSES_PATH: ${EVM_TOKEN_ADDRESSES_PATH:-/state/token-addresses.json}
-      EVM_REQUIRED_CONFIRMATIONS: ${EVM_REQUIRED_CONFIRMATIONS:-1}
+      EVM_REQUIRED_CONFIRMATIONS: ${EVM_REQUIRED_CONFIRMATIONS:-2}
       EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS: ${EVM_DEPOSIT_SCAN_LOOKBACK_BLOCKS:-}
       BRIDGE_HTTP_PORT: ${BRIDGE_HTTP_PORT:-8080}
-      BRIDGE_PROFILE: ${BRIDGE_PROFILE:-anvil}
-      BRIDGE_DEMO_ENABLED: ${BRIDGE_DEMO_ENABLED:-0}
+      BRIDGE_PROFILE: sepolia
+      BRIDGE_DEMO_ENABLED: ${BRIDGE_DEMO_ENABLED:-1}
       BRIDGE_UI_ENABLED: ${BRIDGE_UI_ENABLED:-1}
       BRIDGE_CORS_ALLOW_ORIGIN: ${BRIDGE_CORS_ALLOW_ORIGIN:-*}
-      DEMO_EVM_FUNDED_PRIVATE_KEY: ${DEMO_EVM_FUNDED_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
+      DEMO_EVM_FUNDED_PRIVATE_KEY: ${DEMO_EVM_FUNDED_PRIVATE_KEY:-}
       RUST_LOG: ${RUST_LOG:-info,sqlx=warn,hyper=warn,tower_http=warn}
       LOG_FORMAT: ${LOG_FORMAT:-json}
       # Forward BRIDGE_PRICER through from the caller (e2e harness sets =mock;
@@ -42,7 +38,7 @@ services:
     ports:
       - "${BRIDGE_HTTP_PORT:-8080}:8080"
     volumes:
-      - anvil-state:/state:ro
+      - sepolia-token-state:/state:ro
       - bridge-miden-store:/var/lib/bridge/miden-store
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
@@ -54,6 +50,29 @@ services:
       # removes the local prover cost, but testnet confirmation still needs
       # a longer startup window.
       start_period: 300s
+
+  lab-ui:
+    build:
+      context: ./frontend
+    depends_on:
+      bridge:
+        condition: service_healthy
+    environment:
+      BRIDGE_API_BASE: ${LAB_UI_BRIDGE_API_BASE:-http://bridge:8080}
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: 3000
+    ports:
+      - "${LAB_UI_HTTP_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   miden-node:
     profiles: ["local-node"]
@@ -95,40 +114,6 @@ services:
       - miden-node-accounts:/var/lib/miden/accounts
       - ./scripts/miden_node_genesis.sh:/scripts/miden_node_genesis.sh:ro
 
-  anvil:
-    image: ghcr.io/foundry-rs/foundry:latest
-    entrypoint: ["/bin/sh", "/bootstrap/anvil_start.sh"]
-    ports:
-      - "8545:8545"
-    volumes:
-      - anvil-state:/state
-      - ./scripts/anvil_start.sh:/bootstrap/anvil_start.sh:ro
-      - ./scripts/anvil_bootstrap.sh:/bootstrap/anvil_bootstrap.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "cast rpc eth_blockNumber --rpc-url http://localhost:8545 | tr -d '\"' | grep -Eq '^0x[0-9a-fA-F]+$'"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 3s
-
-  anvil-init:
-    image: ghcr.io/foundry-rs/foundry:latest
-    user: root
-    entrypoint: ["/bin/bash", "/bootstrap/anvil_bootstrap.sh"]
-    depends_on:
-      anvil:
-        condition: service_healthy
-    environment:
-      RPC_URL: http://anvil:8545
-      STATE_DIR: /state
-      PROJECT_ROOT: /workspace
-      SOLVER_PRIVATE_KEY: ${SOLVER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382dbb7d2745078b2336b91c60d50d6b6d7}
-    volumes:
-      - anvil-state:/state
-      - ./scripts/anvil_bootstrap.sh:/bootstrap/anvil_bootstrap.sh:ro
-      - ./contracts:/workspace/contracts:ro
-      - ./foundry.toml:/workspace/foundry.toml:ro
-
   postgres:
     image: postgres:17
     environment:
@@ -147,8 +132,8 @@ services:
       start_period: 5s
 
 volumes:
-  anvil-state:
   bridge-miden-store:
   miden-node-accounts:
   miden-node-data:
   postgres-data:
+  sepolia-token-state:

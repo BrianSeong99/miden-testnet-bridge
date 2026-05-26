@@ -12,7 +12,7 @@ use miden_testnet_bridge::chains::miden_bridge_note::BridgeOutDepositMemo;
 
 #[tokio::test]
 #[serial]
-async fn outbound_note_releases_on_anvil() -> Result<()> {
+async fn outbound_note_releases_on_sepolia() -> Result<()> {
     require_e2e("outbound e2e");
 
     let ctx = start_test("outbound").await?;

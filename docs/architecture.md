@@ -99,9 +99,3 @@ sequenceDiagram
     User->>Bridge: GET /v0/status
     Bridge-->>User: SUCCESS + tx metadata
 ```
-
-## Anvil Fallback
-
-The local Anvil profile follows the same logical shape with `eth-anvil:*`
-assets and local EVM transactions. It is documented separately in
-[`anvil/local-sandbox.md`](anvil/local-sandbox.md).

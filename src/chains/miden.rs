@@ -12,9 +12,10 @@ use miden_client::{
     builder::ClientBuilder,
     grpc_support::{DEVNET_PROVER_ENDPOINT, TESTNET_PROVER_ENDPOINT},
     keystore::FilesystemKeyStore,
-    rpc::Endpoint,
+    rpc::{Endpoint, EndpointError, GrpcClient, NodeRpcClient},
 };
 use miden_client_sqlite_store::ClientBuilderSqliteExt;
+use miden_protocol::Word;
 use tokio::{runtime::Builder as RuntimeBuilder, task, time::sleep};
 use tracing::warn;
 
@@ -84,6 +85,33 @@ impl MidenClient {
             self.remote_prover_timeout,
         )
         .await
+    }
+
+    pub async fn account_commitment(&self, account_id: AccountId) -> Result<Option<Word>> {
+        let rpc = GrpcClient::new(
+            &self.endpoint,
+            self.remote_prover_timeout.as_millis() as u64,
+        );
+        match rpc.get_account_details(account_id).await {
+            Ok(account) => {
+                let commitment = account.commitment();
+                if commitment == Word::empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(commitment))
+                }
+            }
+            Err(err) => match err.endpoint_error() {
+                Some(EndpointError::GetAccount(error))
+                    if error.to_string() == "account not found" =>
+                {
+                    Ok(None)
+                }
+                _ => Err(err).with_context(|| {
+                    format!("failed to fetch Miden account details for {account_id}")
+                }),
+            },
+        }
     }
 
     pub fn encode_basic_wallet_address(&self, account_id: AccountId) -> String {

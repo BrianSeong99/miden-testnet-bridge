@@ -13,7 +13,7 @@ const viewport = { width: 1920, height: 1080 };
 const clips = [
   {
     name: "repo",
-    url: "https://github.com/BrianSeong99/miden-testnet-bridge",
+    url: "https://example.invalid/miden-testnet-bridge",
     description: "GitHub repository overview",
     steps: async (page) => {
       await page.waitForTimeout(1200);
@@ -25,7 +25,7 @@ const clips = [
   },
   {
     name: "guide",
-    url: "https://github.com/BrianSeong99/miden-testnet-bridge/blob/main/docs/builder-testing-guide.md",
+    url: "https://example.invalid/miden-testnet-bridge/blob/main/docs/builder-testing-guide.md",
     description: "Sepolia-first builder guide",
     steps: async (page) => {
       await page.waitForTimeout(1200);
@@ -39,7 +39,7 @@ const clips = [
   },
   {
     name: "evidence",
-    url: "https://brianseong99.github.io/miden-testnet-bridge/smoke-test-report.html",
+    url: "https://example.invalid/miden-testnet-bridge/smoke-test-report.html",
     description: "Published Sepolia evidence page",
     steps: async (page) => {
       await page.waitForTimeout(1200);

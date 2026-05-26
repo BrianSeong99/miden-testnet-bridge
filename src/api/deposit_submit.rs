@@ -65,7 +65,7 @@ mod tests {
                             "depositMode": "SIMPLE",
                             "swapType": "EXACT_INPUT",
                             "slippageTolerance": 100.0,
-                            "originAsset": "eth-anvil:eth",
+                            "originAsset": "eth-sepolia:eth",
                             "depositType": "ORIGIN_CHAIN",
                             "destinationAsset": "miden-testnet:eth",
                             "amount": "1000",

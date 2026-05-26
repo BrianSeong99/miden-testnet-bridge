@@ -55,7 +55,7 @@ impl LiveHarness {
     async fn start() -> Option<Self> {
         let rpc_url = std::env::var("EVM_RPC_URL").ok()?;
         let temp_dir = TempDir::new().expect("temp dir");
-        bootstrap_anvil(&rpc_url, temp_dir.path()).await;
+        bootstrap_evm_mock_tokens(&rpc_url, temp_dir.path()).await;
         let token_file = temp_dir.path().join("token-addresses.json");
 
         let store = memory_state();
@@ -72,7 +72,7 @@ impl LiveHarness {
                         .ok()
                         .and_then(|value| value.parse().ok())
                         .unwrap_or(271828),
-                    profile: BridgeProfile::Anvil,
+                    profile: BridgeProfile::Sepolia,
                     required_confirmations: 1,
                     deposit_scan_lookback_blocks: None,
                 },
@@ -269,7 +269,7 @@ async fn detects_native_eth_and_advances_to_success() {
         eprintln!("skipping: EVM_RPC_URL is not set");
         return;
     };
-    let quote = harness.create_quote("eth-anvil:eth").await;
+    let quote = harness.create_quote("eth-sepolia:eth").await;
     let deposit_address = quote
         .quote
         .deposit_address
@@ -295,7 +295,7 @@ async fn detects_usdc_transfer_and_release_paths_work() {
         eprintln!("skipping: EVM_RPC_URL is not set");
         return;
     };
-    let quote = harness.create_quote("eth-anvil:usdc").await;
+    let quote = harness.create_quote("eth-sepolia:usdc").await;
     let deposit_address = Address::from_str(
         quote
             .quote
@@ -322,7 +322,7 @@ async fn detects_usdc_transfer_and_release_paths_work() {
         miden_testnet_bridge::types::SwapStatus::Success
     );
 
-    let release_quote = harness.create_quote("eth-anvil:eth").await;
+    let release_quote = harness.create_quote("eth-sepolia:eth").await;
     let release_correlation_id = Uuid::parse_str(&release_quote.correlation_id).unwrap();
     let recipient = Address::from_str("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc").unwrap();
     let eth_before = balance(&harness.rpc_url, recipient).await;
@@ -360,7 +360,7 @@ async fn deposit_detection_is_idempotent_for_same_tx_hash() {
         eprintln!("skipping: EVM_RPC_URL is not set");
         return;
     };
-    let quote = harness.create_quote("eth-anvil:eth").await;
+    let quote = harness.create_quote("eth-sepolia:eth").await;
     let deposit_address = quote.quote.deposit_address.clone().unwrap();
     let record = harness
         .store
@@ -397,9 +397,9 @@ async fn deposit_detection_is_idempotent_for_same_tx_hash() {
     assert_eq!(stored.status, "KNOWN_DEPOSIT_TX");
 }
 
-async fn bootstrap_anvil(rpc_url: &str, state_dir: &std::path::Path) {
+async fn bootstrap_evm_mock_tokens(rpc_url: &str, state_dir: &std::path::Path) {
     let status = Command::new("bash")
-        .arg("scripts/anvil_bootstrap.sh")
+        .arg("scripts/evm_mock_tokens_bootstrap.sh")
         .env("RPC_URL", rpc_url)
         .env("STATE_DIR", state_dir)
         .env(

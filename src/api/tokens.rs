@@ -50,7 +50,7 @@ fn evm_tokens(
         timestamp,
     )];
 
-    if profile == BridgeProfile::Anvil || addresses.usdc.is_some() {
+    if addresses.usdc.is_some() {
         tokens.push(token(
             &format!("{prefix}:usdc"),
             6.0,
@@ -60,7 +60,7 @@ fn evm_tokens(
             timestamp,
         ));
     }
-    if profile == BridgeProfile::Anvil || addresses.usdt.is_some() {
+    if addresses.usdt.is_some() {
         tokens.push(token(
             &format!("{prefix}:usdt"),
             6.0,
@@ -70,7 +70,7 @@ fn evm_tokens(
             timestamp,
         ));
     }
-    if profile == BridgeProfile::Anvil || addresses.btc.is_some() {
+    if addresses.btc.is_some() {
         tokens.push(token(
             &format!("{prefix}:btc"),
             8.0,
@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sepolia_profile_returns_sepolia_eth_without_anvil_assets() {
+    async fn sepolia_profile_returns_sepolia_eth_only_for_evm_by_default() {
         let app = app(AppState::new(memory_state()).with_runtime_options(
             false,
             false,
@@ -177,6 +177,6 @@ mod tests {
                 .iter()
                 .any(|token| token.asset_id == "miden-testnet:eth")
         );
-        assert!(!tokens.iter().any(|token| token.asset_id == "eth-anvil:eth"));
+        assert!(!tokens.iter().any(|token| token.asset_id == "eth-local:eth"));
     }
 }
