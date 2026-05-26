@@ -127,28 +127,81 @@ p {
   gap: 8px;
 }
 
-.nav-wallet {
-  display: inline-grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+.nav-toolbar {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  width: clamp(168px, 22vw, 244px);
-  min-height: 44px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 13px;
-  font-weight: 760;
-  padding: 0 9px 0 12px;
+  gap: 4px;
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  padding: 4px;
 }
 
+.nav-route-select,
+.nav-wallet {
+  display: inline-grid;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+  padding: 0 10px;
+}
+
+.nav-route-select {
+  position: relative;
+  grid-template-columns: auto minmax(96px, 1fr) auto auto;
+  width: clamp(220px, 24vw, 286px);
+}
+
+.nav-wallet {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  width: clamp(168px, 18vw, 224px);
+}
+
+.nav-route-select:hover,
 .nav-wallet:hover:not(:disabled) {
-  background: #111413;
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+
+.nav-route-select span,
+.nav-route-select small,
+.nav-wallet small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.nav-route-select select {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 760;
+  outline: none;
+  padding: 0;
+}
+
+.nav-route-select svg {
+  color: var(--muted);
+  pointer-events: none;
 }
 
 .nav-wallet.connected {
-  border-color: rgba(34, 120, 79, 0.34);
-  background: var(--surface);
+  border-color: rgba(34, 120, 79, 0.26);
+  background: rgba(34, 120, 79, 0.06);
   color: var(--ink);
 }
 
@@ -170,13 +223,9 @@ p {
   align-items: center;
   min-height: 24px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--surface-muted);
   color: currentColor;
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 760;
   padding: 0 8px;
-  text-transform: uppercase;
 }
 
 .nav-wallet.connected small {
@@ -294,48 +343,6 @@ h2 {
   padding: 4px;
 }
 
-.bridge-mode-select {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 10px;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-muted);
-  padding: 10px;
-}
-
-.bridge-mode-select > span {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 760;
-  text-transform: uppercase;
-}
-
-.bridge-mode-select select {
-  grid-column: 1 / -1;
-  width: 100%;
-  min-height: 44px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 740;
-  outline: none;
-  padding: 0 12px;
-}
-
-.bridge-mode-select small {
-  justify-self: end;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 720;
-  text-transform: uppercase;
-}
-
 .mode-callout {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -427,27 +434,6 @@ h2 {
 }
 
 .wallet-card small {
-  text-transform: none;
-}
-
-.wallet-connect {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-width: 106px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 760;
-  padding: 0 11px;
-}
-
-.wallet-connect span {
-  color: inherit;
-  font-family: inherit;
-  font-size: inherit;
   text-transform: none;
 }
 
@@ -1160,6 +1146,9 @@ h2 {
 
   .app-header,
   .detail-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
     min-height: 48px;
   }
 
@@ -1173,16 +1162,36 @@ h2 {
   }
 
   .top-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     min-width: 0;
+    width: 100%;
   }
 
   .app-header .health-pill {
     display: none;
   }
 
+  .nav-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-width: 0;
+  }
+
+  .nav-route-select,
   .nav-wallet {
-    width: min(174px, 47vw);
+    width: 100%;
     padding-inline: 10px 8px;
+  }
+
+  .nav-route-select {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .nav-route-select span,
+  .nav-route-select small {
+    display: none;
   }
 
   .nav-wallet small {
@@ -1237,10 +1246,6 @@ h2 {
 
   .route-strip {
     grid-template-columns: 1fr;
-  }
-
-  .wallet-connect {
-    width: 100%;
   }
 
   .guide-hero {
