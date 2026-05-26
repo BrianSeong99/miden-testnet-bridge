@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowDownUp, ArrowRight, BookOpen, CheckCircle2, ChevronRight, PlugZap, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDownUp,
+  ArrowRight,
+  BookOpen,
+  CheckCircle2,
+  ChevronRight,
+  PlugZap,
+  RefreshCw,
+  Wallet as WalletIcon,
+} from "lucide-react";
 import {
   type AgglayerPlan,
   activeStatuses,
@@ -571,6 +581,14 @@ export function BridgeLab() {
   const primaryLabel = getPrimaryLabel();
 
   const runtimeOk = runtime.apiHealth === "ok" && runtime.demoState === "enabled";
+  const routeExecution =
+    selectedBridgeMode.action === "planner"
+      ? direction === "evm-to-miden"
+        ? "Wallet send"
+        : "Operator handoff"
+      : selectedBridgeMode.action === "demo"
+        ? "Mock service"
+        : "Pending";
   const primaryDisabled =
     selectedBridgeMode.action === "disabled" ||
     (selectedBridgeMode.action === "demo" && !mockApiEnabled) ||
@@ -587,6 +605,21 @@ export function BridgeLab() {
           <span>Bridge</span>
         </Link>
         <div className="top-actions">
+          <button
+            type="button"
+            className={`nav-wallet ${walletReady ? "connected" : evmWallet ? "wrong" : ""}`}
+            onClick={() =>
+              run("connect-wallet", async () => {
+                await connectWallet();
+              })
+            }
+            disabled={busy !== null}
+            aria-label={walletReady ? `Connected Sepolia wallet ${evmWallet.address}` : "Connect Sepolia wallet"}
+          >
+            <WalletIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+            <span>{walletReady ? formatWalletAddress(evmWallet.address) : evmWallet ? "Wrong network" : "Connect wallet"}</span>
+            <small>{walletReady ? "Sepolia" : "Sepolia"}</small>
+          </button>
           <span className={`health-pill ${runtimeOk ? "tone-success" : "tone-warning"}`}>
             <span aria-hidden="true" />
             {runtimeOk ? "live" : runtime.apiHealth}
@@ -643,28 +676,7 @@ export function BridgeLab() {
             ) : null}
           </div>
 
-          <section className="wallet-panel" aria-label="Wallet connections">
-            <div className={`wallet-card ${walletReady ? "connected" : ""}`}>
-              <div>
-                <span>Sepolia wallet</span>
-                <strong>{evmWallet ? formatWalletAddress(evmWallet.address) : "Not connected"}</strong>
-                <small>{evmWallet ? (evmWallet.isSepolia ? "Sepolia ready" : "Wrong network") : "MetaMask, Rabby, or injected wallet"}</small>
-              </div>
-              <button
-                type="button"
-                className="wallet-connect"
-                onClick={() =>
-                  run("connect-wallet", async () => {
-                    await connectWallet();
-                  })
-                }
-                disabled={busy !== null}
-              >
-                <PlugZap size={15} strokeWidth={1.8} aria-hidden="true" />
-                <span>{walletReady ? "Connected" : "Connect"}</span>
-              </button>
-            </div>
-
+          <section className="wallet-panel account-panel" aria-label="Miden account">
             <label className={`wallet-card miden-wallet ${midenAccountReady ? "connected" : midenAccountId.trim() ? "invalid" : ""}`}>
               <div>
                 <span>Miden account</span>
@@ -724,6 +736,23 @@ export function BridgeLab() {
                   <small>{config.toChain}</small>
                 </span>
               </div>
+            </div>
+          </div>
+
+          <div className="route-strip" aria-label="Selected bridge route">
+            <div>
+              <span>Route</span>
+              <strong>{selectedBridgeMode.label}</strong>
+            </div>
+            <div>
+              <span>Path</span>
+              <strong>
+                {config.fromChain} to {config.toChain}
+              </strong>
+            </div>
+            <div>
+              <span>Execution</span>
+              <strong>{routeExecution}</strong>
             </div>
           </div>
 

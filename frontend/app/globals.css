@@ -127,6 +127,68 @@ p {
   gap: 8px;
 }
 
+.nav-wallet {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: clamp(168px, 22vw, 244px);
+  min-height: 44px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 13px;
+  font-weight: 760;
+  padding: 0 9px 0 12px;
+}
+
+.nav-wallet:hover:not(:disabled) {
+  background: #111413;
+}
+
+.nav-wallet.connected {
+  border-color: rgba(34, 120, 79, 0.34);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.nav-wallet.wrong {
+  border-color: rgba(154, 106, 31, 0.36);
+  background: rgba(154, 106, 31, 0.08);
+  color: var(--ink);
+}
+
+.nav-wallet span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-wallet small {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: currentColor;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 760;
+  padding: 0 8px;
+  text-transform: uppercase;
+}
+
+.nav-wallet.connected small {
+  background: rgba(34, 120, 79, 0.1);
+  color: var(--green);
+}
+
+.nav-wallet.wrong small {
+  background: rgba(154, 106, 31, 0.13);
+  color: var(--amber);
+}
+
 .health-pill,
 .active-count,
 .status-badge {
@@ -502,6 +564,40 @@ h2 {
   border: 4px solid var(--surface);
   background: var(--ink);
   color: var(--surface);
+}
+
+.route-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--line);
+}
+
+.route-strip div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  background: var(--surface);
+  padding: 11px 12px;
+}
+
+.route-strip span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.route-strip strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .primary-action,
@@ -1073,7 +1169,24 @@ h2 {
   }
 
   .brand span {
-    font-size: 14px;
+    display: none;
+  }
+
+  .top-actions {
+    min-width: 0;
+  }
+
+  .app-header .health-pill {
+    display: none;
+  }
+
+  .nav-wallet {
+    width: min(174px, 47vw);
+    padding-inline: 10px 8px;
+  }
+
+  .nav-wallet small {
+    display: none;
   }
 
   .bridge-stage {
@@ -1119,6 +1232,10 @@ h2 {
 
   .wallet-card,
   .miden-wallet {
+    grid-template-columns: 1fr;
+  }
+
+  .route-strip {
     grid-template-columns: 1fr;
   }
 
