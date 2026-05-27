@@ -11,7 +11,6 @@ import {
   ChevronDown,
   ChevronRight,
   PlugZap,
-  RefreshCw,
   Wallet as WalletIcon,
 } from "lucide-react";
 import {
@@ -272,23 +271,6 @@ export function BridgeLab() {
     await Promise.all(activeFlows.map((flow) => loadFlow(flow.correlationId).catch(() => undefined)));
   }, [flows, loadFlow]);
 
-  const refreshAll = useCallback(async () => {
-    setBusy("refresh");
-    setError(null);
-    try {
-      const nextRuntime = await refreshRuntime();
-      if (nextRuntime.demoState === "enabled") {
-        await refreshFlows();
-      } else {
-        setFlows(new Map());
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setBusy(null);
-    }
-  }, [refreshFlows, refreshRuntime]);
-
   const run = useCallback(async (key: string, task: () => Promise<void>) => {
     setBusy(key);
     setError(null);
@@ -407,7 +389,7 @@ export function BridgeLab() {
         method: "POST",
         body: JSON.stringify({ accountId: inboundWallet.accountId }),
       });
-      setNotice("Claim request submitted to the Miden wallet.");
+      setNotice("Claim request submitted for the demo Miden account.");
       await refreshFlows();
     });
   }
@@ -423,7 +405,7 @@ export function BridgeLab() {
       saveStorage(storageKeys.outboundWallet, response.wallet);
       upsertFlow(response.flow);
       setLastFlowId(response.flow.correlationId);
-      setNotice("Miden wallet funded. Bridge back to Sepolia when the funding note is ready.");
+      setNotice("Demo Miden account funded. Bridge back to Sepolia when the funding note is ready.");
     });
   }
 
@@ -581,7 +563,6 @@ export function BridgeLab() {
 
   const primaryLabel = getPrimaryLabel();
 
-  const runtimeOk = runtime.apiHealth === "ok" && runtime.demoState === "enabled";
   const routeExecution =
     selectedBridgeMode.action === "planner"
       ? direction === "evm-to-miden"
@@ -639,13 +620,6 @@ export function BridgeLab() {
               <small>{walletReady ? "Sepolia" : "Sepolia"}</small>
             </button>
           </div>
-          <span className={`health-pill ${runtimeOk ? "tone-success" : "tone-warning"}`}>
-            <span aria-hidden="true" />
-            {runtimeOk ? "live" : runtime.apiHealth}
-          </span>
-          <button type="button" className="icon-button" onClick={refreshAll} disabled={busy === "refresh"} aria-label="Refresh">
-            <RefreshCw size={17} strokeWidth={1.8} aria-hidden="true" />
-          </button>
         </div>
       </header>
 
@@ -806,9 +780,6 @@ export function BridgeLab() {
               <p className="eyebrow">Recent</p>
               <h2>Transactions</h2>
             </div>
-            <button type="button" className="text-button" onClick={refreshAll} disabled={busy === "refresh"}>
-              Refresh
-            </button>
           </div>
 
           <div className="transaction-list">

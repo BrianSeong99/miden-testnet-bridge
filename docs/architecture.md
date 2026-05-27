@@ -11,7 +11,7 @@ flowchart TB
     subgraph Builder["Builder app or test agent"]
       App["App UI / script"]
       EvmWallet["Sepolia wallet"]
-      MidenWallet["Miden wallet"]
+      MidenWallet["Miden wallet / MidenFi adapter"]
     end
 
     subgraph Bridge["Mock NEAR Intents 1Click Bridge API"]
@@ -49,6 +49,10 @@ flowchart TB
     Solver --> MidenStore
     Poller --> MidenStore
 ```
+
+The current lab UI accepts a pasted Miden account ID, but wallet-native frontend
+work should use the MidenFi wallet adapter and the Miden React SDK guidance in
+[`docs/miden-frontend-integration.md`](miden-frontend-integration.md).
 
 ## Inbound: Sepolia To Miden
 

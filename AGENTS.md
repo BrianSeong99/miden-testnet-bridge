@@ -43,6 +43,10 @@
   it before changing UI copy, chat/help behavior, support docs, or route labels.
   Wallet language should lead with Receive, Send, Swap, Earn, and Claim; provider
   names such as AggLayer, NEAR Intents, and Epoch are route labels.
+- Miden frontend and wallet-adapter guidance lives in
+  `docs/miden-frontend-integration.md`. Read it before changing Miden account
+  selection, Miden wallet copy, note claim/consume UX, or frontend SDK
+  dependencies.
 - Inbound means EVM deposit to Miden payout:
   - User requests an EVM-to-Miden quote from the Bridge API.
   - The user deposits to the returned EVM deposit address.

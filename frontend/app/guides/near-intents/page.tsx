@@ -46,9 +46,10 @@ export default function NearIntentsGuidePage() {
           <span>2</span>
           <h2>Connect wallets</h2>
           <p>
-            The lab uses an injected Sepolia wallet for deposits, refunds, and EVM recipients. Miden currently uses an
-            explicit testnet account ID field; connect a real Miden wallet by replacing that field once a browser wallet
-            provider contract is available.
+            The lab uses an injected Sepolia wallet for deposits, refunds, and EVM recipients. Miden currently uses a
+            manual testnet account ID field because this Next app does not embed the Miden SDK or MidenFi wallet adapter
+            yet. A wallet-native version should connect through <code>@miden-sdk/miden-wallet-adapter-react</code> and
+            submit Miden-side actions through the connected Miden wallet.
           </p>
         </article>
 

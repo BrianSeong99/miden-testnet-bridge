@@ -150,8 +150,10 @@ NEAR Intents, AggLayer, and Epoch provider routes.
 The lab UI includes a native injected-wallet connector for Sepolia wallets
 such as MetaMask or Rabby. For the NEAR Intents mock flow, Sepolia deposits are
 sent from the connected browser wallet and submitted back to `/v0/deposit/submit`.
-For Miden, the UI accepts a testnet account ID because there is not yet a
-standard injected Miden browser wallet provider in this mock service.
+For Miden, this lab currently accepts a testnet account ID because it does not
+embed the Miden Web SDK or MidenFi wallet adapter yet. That is a lab boundary,
+not a platform limitation. Wallet-native integration guidance lives in
+[`docs/miden-frontend-integration.md`](docs/miden-frontend-integration.md).
 
 ## What This Proves
 
@@ -478,6 +480,8 @@ make e2e-local-node
 - [`docs/builder-testing-guide.md`](docs/builder-testing-guide.md): Sepolia
   builder tutorial.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md): operator recovery procedures.
+- [`docs/miden-frontend-integration.md`](docs/miden-frontend-integration.md):
+  wallet-native Miden frontend integration notes.
 - [`docs/smoke-test-report.html`](docs/smoke-test-report.html): recorded
   Sepolia evidence page.
 - [`AGENTS.md`](AGENTS.md): canonical repo operating instructions for agents.

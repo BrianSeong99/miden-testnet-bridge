@@ -56,6 +56,9 @@ Current implementation boundary:
 - The Bridge UI frontend owns quote review, route/provider selection,
   source-chain signing prompts, progress tracking, claim/recovery actions, and
   bridge detail pages.
+- The current lab UI still uses a manual Miden account-id field. Wallet-native
+  integration should use the MidenFi wallet adapter; see
+  `docs/miden-frontend-integration.md`.
 - Future wallet-native versions may mirror these states into wallet Activity,
   but the current source of truth for bridge progress is the Bridge UI.
 
@@ -225,3 +228,7 @@ provider implementations live in separate packages. That mirrors the external
 signer pattern: the wallet gets consistent activity, quote, claim, and recovery
 semantics while AggLayer, NEAR Intents, Epoch, or future providers can evolve
 independently.
+
+For frontend implementation details, use
+`docs/miden-frontend-integration.md` as the guardrail before adding Miden SDK or
+MidenFi wallet-adapter behavior to the Next UI.

@@ -65,6 +65,10 @@ export default function AggLayerGuidePage() {
             The lab form can also send this Sepolia transaction through an injected browser wallet after the user
             reviews and confirms the testnet transaction.
           </p>
+          <p>
+            In a wallet-native version, the Miden account should come from the connected MidenFi wallet adapter instead
+            of a pasted field.
+          </p>
           <pre>{`curl -s /api/bridge/agglayer/l1/deposit/plan \\
   -H 'content-type: application/json' \\
   -d '{

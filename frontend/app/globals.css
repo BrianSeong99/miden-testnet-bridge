@@ -238,7 +238,6 @@ p {
   color: var(--amber);
 }
 
-.health-pill,
 .active-count,
 .status-badge {
   display: inline-flex;
@@ -255,13 +254,6 @@ p {
   padding: 0 11px;
   text-transform: uppercase;
   white-space: nowrap;
-}
-
-.health-pill span {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: currentColor;
 }
 
 .icon-button {
@@ -1185,10 +1177,6 @@ h2 {
     grid-template-columns: minmax(0, 1fr) auto;
     min-width: 0;
     width: 100%;
-  }
-
-  .app-header .health-pill {
-    display: none;
   }
 
   .nav-toolbar {

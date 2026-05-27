@@ -61,6 +61,11 @@ For wallet UI and wallet chat semantics, read
 `docs/wallet-bridge-clarity.md`. User-facing language should start from
 Receive, Send, Swap, Earn, and Claim, then explain the selected provider route.
 
+For Miden wallet integration details, read
+`docs/miden-frontend-integration.md`. The current lab UI uses a manual Miden
+account-id field, but wallet-native work should use the MidenFi wallet adapter
+and should not imply that no browser wallet adapter exists.
+
 `/demo/*` and the clickable lab UI are Sepolia testnet helpers for manual
 walkthroughs. Do not make app integrations depend on demo-only endpoints.
 
