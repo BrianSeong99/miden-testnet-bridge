@@ -25,7 +25,19 @@ pub const DEFAULT_GAS_LIMIT: u64 = 300_000;
 pub const DEFAULT_AMOUNT_ETH: &str = "0.001";
 pub const DEFAULT_MIDEN_WITHDRAW_AMOUNT: &str = "10000";
 pub const VERSION_PIN: &str = "deployed Bali AggLayer: miden-client v0.14.4 / Poseidon2";
-pub const SOURCE_NOTE: &str = "0xMiden/miden-client#2173 review notes, rechecked 2026-05-26";
+pub const SOURCE_NOTE: &str = "0xMiden/miden-client#2173 Bali bridge docs, rechecked 2026-05-27";
+pub const L2_WITHDRAW_REFERENCE_SCRIPT: &str =
+    "0xMiden/miden-client#2173 docs/.../scripts/bali-l2-withdraw.sh";
+pub const L2_WITHDRAW_REQUIRED_CONFIG_KEYS: &[&str] = &[
+    "MIDEN_STORE_DIR",
+    "MIDEN_NODE_URL",
+    "MIDEN_ACCOUNT_ID",
+    "MIDEN_BRIDGE_ID",
+    "MIDEN_FAUCET_ID",
+    "MIDEN_WITHDRAW_AMOUNT",
+    "ETH_ACCOUNT_ID",
+    "DEST_L1_NETWORK",
+];
 pub const CLAIM_ASSET_SIGNATURE: &str = "claimAsset(bytes32[32],bytes32[32],uint256,bytes32,bytes32,uint32,address,uint32,address,uint256,bytes)";
 
 sol! {
@@ -119,6 +131,8 @@ pub struct AgglayerL2WithdrawPlan {
     pub claims_url: String,
     pub merkle_proof_url_template: String,
     pub claim_command_template: String,
+    pub reference_script: &'static str,
+    pub required_config_keys: Vec<&'static str>,
     pub readiness_checks: Vec<String>,
     pub warnings: Vec<String>,
 }
@@ -250,13 +264,15 @@ pub fn agglayer_info() -> Result<AgglayerInfo> {
         ],
         miden_to_l1_flow: vec![
             "Build gateway-fm/miden-agglayer bridge-out-tool.",
+            "Use the 0xMiden/miden-client#2173 bali-l2-withdraw.sh helper header as the withdraw config reference.",
             "Submit a B2AGG note from the Miden wallet.",
             "Poll /bridges/{sepolia-address} until the Miden-origin row has ready_for_claim=true.",
             "Fetch /merkle-proof with deposit_cnt and network_id, then call claimAsset on Sepolia.",
         ],
         warnings: vec![
             "Testnet only. Never use mainnet funds or production keys.",
-            "The public tutorial is still an open PR; recheck constants before a funded run.",
+            "The public tutorial is still an open PR; recheck AGGLAYER_* constants before a funded run.",
+            "gateway-fm/miden-agglayer scripts/e2e-l2-to-l1.sh still has local hardcoded values; use it only for claimAsset calldata shape.",
             "This service returns dry-run plans; Miden-to-Sepolia claimAsset remains an explicit operator action.",
         ],
     })
@@ -401,6 +417,8 @@ pub fn build_l2_withdraw_plan(
         claims_url,
         merkle_proof_url_template,
         claim_command_template,
+        reference_script: L2_WITHDRAW_REFERENCE_SCRIPT,
+        required_config_keys: L2_WITHDRAW_REQUIRED_CONFIG_KEYS.to_vec(),
         readiness_checks: vec![
             format!("ready_for_claim == true"),
             format!("network_id == {}", config.dest_network),
@@ -410,7 +428,8 @@ pub fn build_l2_withdraw_plan(
         warnings: vec![
             "Dry-run only: this service does not submit B2AGG notes or claim assets.".to_owned(),
             "Poll the bridges URL for readiness; the claims URL is post-claim history and stays empty until claimAsset lands.".to_owned(),
-            "Build gateway-fm/miden-agglayer bridge-out-tool before running the command."
+            "Use the 0xMiden/miden-client#2173 bali-l2-withdraw.sh header as the withdraw env/config reference.".to_owned(),
+            "gateway-fm/miden-agglayer scripts/e2e-l2-to-l1.sh contains local hardcoded values; do not copy its IDs or RPC URLs."
                 .to_owned(),
         ],
     })
@@ -901,6 +920,9 @@ mod tests {
             plan.claim_command_template
                 .contains("claimAsset(bytes32[32],bytes32[32],uint256")
         );
+        assert_eq!(plan.reference_script, L2_WITHDRAW_REFERENCE_SCRIPT);
+        assert!(plan.required_config_keys.contains(&"MIDEN_WITHDRAW_AMOUNT"));
+        assert!(plan.required_config_keys.contains(&"DEST_L1_NETWORK"));
         assert!(
             plan.warnings
                 .iter()

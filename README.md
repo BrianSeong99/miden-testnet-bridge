@@ -106,7 +106,10 @@ POST /agglayer/l2/withdraw/plan
 POST /agglayer/l2/withdraw/claim/plan
 ```
 
-The helper records the post-relaunch constants from the PR review notes:
+The helper records the currently configured Bali/Sepolia constants, but these
+are still pending upstream doc finalization. Treat all `AGGLAYER_*` values as
+environment overrides and recheck them against the `bali-l2-withdraw.sh` helper
+from `0xMiden/miden-client#2173` before funded withdrawals:
 
 ```text
 DEST_NETWORK=76
@@ -119,10 +122,19 @@ Sepolia to Miden returns the padded bridge destination, `bridgeAsset` calldata,
 a Gateway FM status URL, and a dry-run `cast send` command. Miden to Sepolia
 returns the `bridge-out-tool` command shape, the correct `/bridges/{address}`
 readiness URL, a `/claims/{address}` history URL, and a `claimAsset` command
-template. After the B2AGG note is submitted, poll `/bridges/{address}` for a
-Miden-origin row with `ready_for_claim=true`, `dest_net=0`, and an empty
-`claim_tx_hash`. Do not use `/claims/{address}` as the readiness check; it is
-empty until a manual `claimAsset` transaction lands.
+template. The withdraw command follows the `bali-l2-withdraw.sh` helper header
+from `0xMiden/miden-client#2173`; set `MIDEN_STORE_DIR`, `MIDEN_NODE_URL`,
+`MIDEN_ACCOUNT_ID`, `MIDEN_BRIDGE_ID`, `MIDEN_FAUCET_ID`,
+`MIDEN_WITHDRAW_AMOUNT`, `ETH_ACCOUNT_ID`, and `DEST_L1_NETWORK`. Do not copy
+network IDs, account IDs, or RPC URLs from
+`gateway-fm/miden-agglayer/scripts/e2e-l2-to-l1.sh`; that script still contains
+local hardcoded values and should only be used as a `claimAsset` calldata-shape
+reference.
+
+After the B2AGG note is submitted, poll `/bridges/{address}` for a Miden-origin
+row with `ready_for_claim=true`, `dest_net=0`, and an empty `claim_tx_hash`. Do
+not use `/claims/{address}` as the readiness check; it is empty until a manual
+`claimAsset` transaction lands.
 
 When a row is ready, `POST /agglayer/l2/withdraw/claim/plan` with the Sepolia
 recipient address. The helper fetches the Gateway FM merkle proof and returns a

@@ -77,10 +77,15 @@ export default function AggLayerGuidePage() {
           <span>3</span>
           <h2>Plan Miden to Sepolia</h2>
           <p>
-            The reverse direction is a handoff to <code>gateway-fm/miden-agglayer</code> and its{" "}
-            <code>bridge-out-tool</code>. This app returns the command shape and claim-status URL; it does not submit the
-            B2AGG note or call <code>claimAsset</code>. The connected Sepolia wallet is used as the destination account
-            in the generated command.
+            The reverse direction follows the <code>bali-l2-withdraw.sh</code> helper from{" "}
+            <code>0xMiden/miden-client#2173</code>. That helper reads a small config file and shells out to{" "}
+            <code>bridge-out-tool</code>. This app returns the same command shape and claim-status URL; it does not submit
+            the B2AGG note or call <code>claimAsset</code>.
+          </p>
+          <p>
+            Do not copy network IDs, account IDs, or RPC URLs from{" "}
+            <code>gateway-fm/miden-agglayer/scripts/e2e-l2-to-l1.sh</code>; that script still contains local test values.
+            Use it only as a reference for the later <code>claimAsset</code> calldata shape.
           </p>
           <p>
             For readiness, poll the returned <code>/bridges/&lt;sepolia-address&gt;</code> URL and look for a row with{" "}

@@ -700,9 +700,8 @@ h2 {
 
 .plan-links {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
-  align-items: center;
+  gap: 8px;
+  align-items: start;
 }
 
 .plan-links span {
@@ -711,6 +710,10 @@ h2 {
   font-size: 11px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.plan-links a {
+  justify-self: start;
 }
 
 .runtime-row {

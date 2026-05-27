@@ -106,6 +106,15 @@ Miden-origin row with `ready_for_claim=true`, `dest_net=0`, and empty
 readiness; it can stay empty while a manual `claimAsset` transaction is already
 available to submit.
 
+For the withdrawal command itself, follow the `bali-l2-withdraw.sh` helper from
+`0xMiden/miden-client#2173`. Its required config keys are `MIDEN_STORE_DIR`,
+`MIDEN_NODE_URL`, `MIDEN_ACCOUNT_ID`, `MIDEN_BRIDGE_ID`, `MIDEN_FAUCET_ID`,
+`MIDEN_WITHDRAW_AMOUNT`, `ETH_ACCOUNT_ID`, and `DEST_L1_NETWORK`. Do not copy
+local IDs, network IDs, or RPC URLs from
+`gateway-fm/miden-agglayer/scripts/e2e-l2-to-l1.sh`; use that script only as a
+claim calldata reference until the upstream docs and network constants are
+merged.
+
 ## Prerequisites
 
 Install these on the host:

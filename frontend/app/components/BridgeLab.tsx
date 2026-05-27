@@ -859,6 +859,8 @@ function AgglayerPlanCard({
       </p>
       {!canSend ? (
         <div className="plan-links">
+          <span>Reference: {plan.referenceScript}</span>
+          <span>Config: {plan.requiredConfigKeys.join(" · ")}</span>
           <a href={plan.claimsUrl} target="_blank" rel="noreferrer">
             Claims history
           </a>
