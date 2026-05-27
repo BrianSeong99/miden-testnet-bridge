@@ -141,6 +141,12 @@ recipient address. The helper fetches the Gateway FM merkle proof and returns a
 dry-run `cast send ... claimAsset(...)` command. Broadcasting remains an
 explicit operator action with a funded Sepolia test key.
 
+Wallet UI, wallet chat, and support agents should read
+[`docs/wallet-bridge-clarity.md`](docs/wallet-bridge-clarity.md) before
+answering product-level bridge questions. It maps wallet-native actions
+(`Receive from another chain`, `Send to another chain`, `Claim`) to the mock
+NEAR Intents, AggLayer, and Epoch provider routes.
+
 The lab UI includes a native injected-wallet connector for Sepolia wallets
 such as MetaMask or Rabby. For the NEAR Intents mock flow, Sepolia deposits are
 sent from the connected browser wallet and submitted back to `/v0/deposit/submit`.

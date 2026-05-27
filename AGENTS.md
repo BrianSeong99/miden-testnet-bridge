@@ -39,6 +39,10 @@
 
 ## Bridge Semantics
 
+- Wallet-facing bridge guidance lives in `docs/wallet-bridge-clarity.md`. Read
+  it before changing UI copy, chat/help behavior, support docs, or route labels.
+  Wallet language should lead with Receive, Send, Swap, Earn, and Claim; provider
+  names such as AggLayer, NEAR Intents, and Epoch are route labels.
 - Inbound means EVM deposit to Miden payout:
   - User requests an EVM-to-Miden quote from the Bridge API.
   - The user deposits to the returned EVM deposit address.

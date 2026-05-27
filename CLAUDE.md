@@ -57,6 +57,10 @@ POST /v0/deposit/submit
 GET  /v0/status
 ```
 
+For wallet UI and wallet chat semantics, read
+`docs/wallet-bridge-clarity.md`. User-facing language should start from
+Receive, Send, Swap, Earn, and Claim, then explain the selected provider route.
+
 `/demo/*` and the clickable lab UI are Sepolia testnet helpers for manual
 walkthroughs. Do not make app integrations depend on demo-only endpoints.
 
