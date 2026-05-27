@@ -315,7 +315,10 @@ export function destinationExplorer(activity: Activity) {
 function normalizeActivity(activity: Activity): Activity {
   const legacyMode = activity.mode as FlowMode | "deposit" | "withdraw";
   const mode: FlowMode = legacyMode === "deposit" ? "receive" : legacyMode === "withdraw" ? "send" : legacyMode;
-  const summary = activity.summary.replace(/^Deposit\b/, "Receive").replace(/^Withdraw\b/, "Send");
+  const summary = activity.summary
+    .replace(/^Deposit\b/, "Receive")
+    .replace(/^Withdraw\b/, "Send")
+    .replace(/^Receive (.+) to Miden$/, "Receive $1 on Miden");
   return { ...activity, mode, summary };
 }
 
