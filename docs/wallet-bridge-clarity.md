@@ -40,6 +40,16 @@ The wallet may show simple route labels such as "fast" or "standard", but the
 details page should still expose the provider name, fees, ETA, claim steps, and
 support diagnostics.
 
+Current implementation boundary:
+
+- The wallet launches or embeds the Bridge UI and can pre-fill the active Miden
+  account.
+- The Bridge UI frontend owns quote review, route/provider selection,
+  source-chain signing prompts, progress tracking, claim/recovery actions, and
+  bridge detail pages.
+- Future wallet-native versions may mirror these states into wallet Activity,
+  but the current source of truth for bridge progress is the Bridge UI.
+
 ## Receive From Another Chain
 
 Use this when the user starts outside Miden and wants funds inside the Miden
@@ -54,7 +64,7 @@ Expected wallet flow:
    WalletConnect, MetaMask, or another injected wallet.
 5. User chooses route/provider and amount.
 6. User reviews the quote and signs or sends on the source chain.
-7. Wallet activity tracks source confirmation, provider processing, Miden note
+7. Bridge UI tracks source confirmation, provider processing, Miden note
    creation, and Miden note claim/consume.
 
 Important state distinction:
@@ -82,7 +92,7 @@ Expected wallet flow:
 4. User reviews the quote, route, ETA, fees, and whether a destination claim is
    required.
 5. User signs or submits the Miden-side action.
-6. Activity tracks Miden transaction, provider observation, finality, claim
+6. Bridge UI tracks Miden transaction, provider observation, finality, claim
    availability, and completion.
 
 For the mock NEAR Intents path in this repo, outbound means:
