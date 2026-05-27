@@ -36,9 +36,15 @@ Provider names are route labels, not wallet actions:
   official NEAR Intents production service.
 - `Epoch`: testnet integration route for Epoch flows.
 
-The wallet may show simple route labels such as "fast" or "standard", but the
-details page should still expose the provider name, fees, ETA, claim steps, and
-support diagnostics.
+For user-facing route selection, prefer mode labels:
+
+| Mode | Provider behavior | Product meaning |
+| --- | --- | --- |
+| Fast | Bridge UI automatically chooses between NEAR Intents mock and Epoch based on cheapest quote, supported asset, source/destination chain coverage, and provider availability | Best default for users who want the simplest route |
+| Slow | AggLayer | No provider bridge fee in the current testnet path, but slower settlement and explicit claim/gas handling |
+
+The first screen can show `Fast` and `Slow`. The details page should still expose
+the actual provider name, quote, fees, ETA, claim steps, and support diagnostics.
 
 Current implementation boundary:
 
@@ -88,11 +94,16 @@ Expected wallet flow:
 
 1. User opens `Send`.
 2. User chooses a destination chain/account, such as Sepolia.
-3. Wallet chooses or asks for a provider route.
-4. User reviews the quote, route, ETA, fees, and whether a destination claim is
+3. User chooses `Fast` or `Slow`.
+4. For `Fast`, Bridge UI auto-selects NEAR Intents mock or Epoch based on
+   cheapest quote, asset availability, chain coverage, and provider availability.
+5. For `Slow`, Bridge UI uses AggLayer. It is the no-provider-fee route in the
+   current testnet path, but the user still needs to understand settlement time
+   and who pays destination claim gas.
+6. User reviews the quote, route, ETA, fees, and whether a destination claim is
    required.
-5. User signs or submits the Miden-side action.
-6. Bridge UI tracks Miden transaction, provider observation, finality, claim
+7. User signs or submits the Miden-side action.
+8. Bridge UI tracks Miden transaction, provider observation, finality, claim
    availability, and completion.
 
 For the mock NEAR Intents path in this repo, outbound means:
