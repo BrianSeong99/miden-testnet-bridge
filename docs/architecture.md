@@ -50,9 +50,11 @@ flowchart TB
     Poller --> MidenStore
 ```
 
-The current lab UI accepts a pasted Miden account ID, but wallet-native frontend
-work should use the MidenFi wallet adapter and the Miden React SDK guidance in
-[`docs/miden-frontend-integration.md`](miden-frontend-integration.md).
+The monorepo Next UI uses the MidenFi wallet adapter for account connection and
+keeps pasted Miden account IDs as an explicit testnet override path. Follow the
+Miden React SDK guidance in
+[`frontend/docs/miden-frontend-integration.md`](../frontend/docs/miden-frontend-integration.md)
+before adding real Miden transaction, sync, or note consume flows.
 
 ## Inbound: Sepolia To Miden
 

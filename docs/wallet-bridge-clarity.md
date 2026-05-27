@@ -34,7 +34,9 @@ Provider names are route labels, not wallet actions:
 - `AggLayer`: testnet protocol bridge path for Sepolia <-> Miden.
 - `NEAR Intents`: mock testnet 1Click-style service in this repo, not an
   official NEAR Intents production service.
-- `Epoch`: testnet integration route for Epoch flows.
+- `Epoch`: testnet integration route for Epoch flows. Use
+  `0xMiden/tutorials#199` and its `examples/bridging-app` as the current
+  implementation reference.
 
 For user-facing route selection, prefer mode labels in both receive and send
 flows:
@@ -56,9 +58,9 @@ Current implementation boundary:
 - The Bridge UI frontend owns quote review, route/provider selection,
   source-chain signing prompts, progress tracking, claim/recovery actions, and
   bridge detail pages.
-- The current lab UI still uses a manual Miden account-id field. Wallet-native
-  integration should use the MidenFi wallet adapter; see
-  `docs/miden-frontend-integration.md`.
+- The monorepo Next UI uses the MidenFi wallet adapter for account connection
+  and keeps pasted Miden account IDs as an explicit testnet override path. See
+  `frontend/docs/miden-frontend-integration.md`.
 - Future wallet-native versions may mirror these states into wallet Activity,
   but the current source of truth for bridge progress is the Bridge UI.
 
@@ -98,6 +100,51 @@ payout note on Miden. The recipient still needs to claim/consume the note.
 
 For AggLayer Sepolia -> Miden, the user must eventually sync and consume the
 Miden-side claim note.
+
+## Swap
+
+Use this when the user wants asset conversion and chain movement in one flow.
+Swap is a route intent layered behind `Receive` or `Send`, not a separate
+top-level wallet action for the first screen.
+
+Expected wallet flow:
+
+1. User chooses receive or send.
+2. User chooses a source asset and a destination asset.
+3. Bridge UI selects `Fast` or `Slow` route behavior using available providers.
+4. User reviews expected received, minimum received, swap fee, bridge fee,
+   network fee, ETA, and provider.
+5. User signs the source transaction.
+6. Bridge UI tracks source confirmation, bridge finality, swap execution,
+   claim availability, and completion.
+
+If the destination is Miden, bridge/provider success only means the Miden note
+or claim is available. Wallet balance updates after sync and consume.
+
+## Earn
+
+Use this when the route enters, exits, or claims from an app/provider position
+instead of simply moving liquid assets. Epoch is the current known testnet route
+for this category, with the active reference in `0xMiden/tutorials#199`.
+
+Expected wallet flow:
+
+1. User opens an app-specific route such as Epoch.
+2. Bridge UI shows whether the action enters a position, exits a position, or
+   claims proceeds.
+3. User reviews app/provider, source account, destination position or receipt,
+   bridge route, fees, ETA, and recovery path.
+4. User signs the source wallet action.
+5. Bridge UI tracks app status, bridge status, claim status, and completion.
+
+Earn copy should not say funds are simply "bridged" when the user is entering
+or exiting an app position.
+
+The Epoch reference app covers Sepolia -> Miden, Miden -> Sepolia, and Miden
+Wallet consumption of the delivered P2ID note. Preserve its important product
+states in wallet copy: reclaim height for Miden -> EVM, in-flight withdraw quote
+recovery after tab changes, and explicit Miden note consumption for EVM ->
+Miden.
 
 ## Send To Another Chain
 
@@ -145,6 +192,24 @@ make the gas payer explicit.
 
 Do not use `/claims/{sepoliaAddress}` as the readiness check. That endpoint is
 post-claim history and may be empty while a claim is already available.
+
+## Wallet-Launched Bridge UI
+
+When the Miden wallet opens the Bridge UI, it should either pass the active
+Miden account as launch context or prompt the user to connect MidenFi before
+quote creation.
+
+- Receive / deposit: Miden is the destination chain, so the active Miden account
+  should preload as the destination account.
+- Send / withdraw: Miden is the source chain, so the active Miden account should
+  appear as the source wallet. The destination resolves to the connected
+  Sepolia wallet or a pasted EVM address.
+- Swap: preload the Miden account on whichever side of the route is Miden.
+- Earn: preload the Miden account as source when entering an app position from
+  Miden, or as destination when exiting/claiming into Miden.
+
+Do not preload arbitrary demo addresses. Preloading is valid only when the value
+comes from a connected wallet or explicit launch parameter.
 
 ## Claim And Recovery
 
@@ -198,6 +263,8 @@ answer:
 ### Epoch
 
 - Treat Epoch as a testnet provider route.
+- Track `0xMiden/tutorials#199` and `examples/bridging-app` as the current
+  implementation reference for Epoch Sepolia <-> Miden behavior.
 - Keep Epoch-specific staking, earn, or app semantics separate from core bridge
   terminology.
 - If Epoch requires a claim or second transaction, surface it through the same
@@ -230,5 +297,5 @@ semantics while AggLayer, NEAR Intents, Epoch, or future providers can evolve
 independently.
 
 For frontend implementation details, use
-`docs/miden-frontend-integration.md` as the guardrail before adding Miden SDK or
-MidenFi wallet-adapter behavior to the Next UI.
+`frontend/docs/miden-frontend-integration.md` as the guardrail before changing
+Miden SDK or MidenFi wallet-adapter behavior in the Next UI.

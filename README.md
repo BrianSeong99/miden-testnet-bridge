@@ -92,6 +92,22 @@ GET  /v0/status
 walkthroughs and manual demos with funded test keys. App integrations should
 still use `/v0/*`.
 
+## Monorepo Frontend
+
+The wallet-native Next.js bridge UI now lives in [`frontend/`](frontend/). Treat
+this repository as the source of truth for both the bridge service and the UI;
+the former standalone `miden-bridge-ui` project is no longer the canonical
+working repo.
+
+Frontend product notes live in:
+
+- [`frontend/docs/product-requirements.md`](frontend/docs/product-requirements.md)
+- [`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md)
+- [`frontend/docs/agglayer-bali.md`](frontend/docs/agglayer-bali.md)
+
+The root [`docs/miden-frontend-integration.md`](docs/miden-frontend-integration.md)
+file is kept only as a compatibility pointer to the canonical frontend doc.
+
 ## AggLayer Testnet Helper
 
 The lab also exposes an AggLayer mode for the public Bali/Sepolia testnet path
@@ -147,13 +163,13 @@ answering product-level bridge questions. It maps wallet-native actions
 (`Receive from another chain`, `Send to another chain`, `Claim`) to the mock
 NEAR Intents, AggLayer, and Epoch provider routes.
 
-The lab UI includes a native injected-wallet connector for Sepolia wallets
-such as MetaMask or Rabby. For the NEAR Intents mock flow, Sepolia deposits are
-sent from the connected browser wallet and submitted back to `/v0/deposit/submit`.
-For Miden, this lab currently accepts a testnet account ID because it does not
-embed the Miden Web SDK or MidenFi wallet adapter yet. That is a lab boundary,
-not a platform limitation. Wallet-native integration guidance lives in
-[`docs/miden-frontend-integration.md`](docs/miden-frontend-integration.md).
+The lab UI includes a native injected-wallet connector for Sepolia wallets such
+as MetaMask or Rabby and a MidenFi wallet adapter button for Miden account
+selection. For the NEAR Intents mock flow, Sepolia deposits are sent from the
+connected browser wallet and submitted back to `/v0/deposit/submit`. Real Miden
+balance, transaction, sync, and note consume flows remain explicit SDK-backed
+work; wallet-native integration guidance lives in
+[`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md).
 
 ## What This Proves
 
@@ -450,6 +466,15 @@ http://localhost:3000
 
 The bridge still serves the legacy static helper at `http://localhost:8080/lab`.
 
+Frontend-only validation:
+
+```bash
+cd frontend
+npm run typecheck
+npm run lint
+npm run build
+```
+
 ## Local-Node Mode
 
 Local-node mode is legacy/manual only. It is useful for isolated experiments,
@@ -480,7 +505,7 @@ make e2e-local-node
 - [`docs/builder-testing-guide.md`](docs/builder-testing-guide.md): Sepolia
   builder tutorial.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md): operator recovery procedures.
-- [`docs/miden-frontend-integration.md`](docs/miden-frontend-integration.md):
+- [`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md):
   wallet-native Miden frontend integration notes.
 - [`docs/smoke-test-report.html`](docs/smoke-test-report.html): recorded
   Sepolia evidence page.
