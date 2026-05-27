@@ -43,13 +43,13 @@ export function ActivityDetail({ id }: { id: string }) {
   const destinationLink = activity ? destinationExplorer(activity) : null;
   const currentIndex = activity ? timeline.findIndex((step) => step.status === activity.status) : -1;
   const needsRecovery = activity?.status === "claim_available" || activity?.status === "failed";
-  const receiptTitle = activity?.mode === "withdraw" ? "Withdrawal receipt" : "Deposit receipt";
+  const receiptTitle = activity?.mode === "send" ? "Cross-chain send receipt" : "Cross-chain receive receipt";
   const receiptAmountLabel =
     activity?.status === "complete"
-      ? activity.mode === "deposit"
+      ? activity.mode === "receive"
         ? "Received on Miden"
         : "Released on Sepolia"
-      : activity?.mode === "deposit"
+      : activity?.mode === "receive"
         ? "Expected on Miden"
         : "Expected on Sepolia";
   const nextAction =
@@ -75,7 +75,7 @@ export function ActivityDetail({ id }: { id: string }) {
   }, []);
 
   useEffect(() => {
-    if (!activity?.bridgeDestinationAddress || activity.provider !== "agglayer" || activity.mode !== "deposit") return;
+    if (!activity?.bridgeDestinationAddress || activity.provider !== "agglayer" || activity.mode !== "receive") return;
 
     let cancelled = false;
     const activityId = activity.id;
@@ -215,13 +215,13 @@ export function ActivityDetail({ id }: { id: string }) {
                 <div>
                   <span>From</span>
                   <strong>{modeCopy?.from}</strong>
-                  <small>{activity.mode === "deposit" ? activity.sourceTxHash ?? activity.txHash : activity.midenTxId ?? activity.txHash}</small>
+                  <small>{activity.mode === "receive" ? activity.sourceTxHash ?? activity.txHash : activity.midenTxId ?? activity.txHash}</small>
                 </div>
                 <ArrowRight size={18} aria-hidden="true" />
                 <div>
                   <span>To</span>
                   <strong>{modeCopy?.to}</strong>
-                  <small>{activity.mode === "deposit" ? activity.midenTxId ?? activity.txHash : activity.destinationTxHash ?? activity.txHash}</small>
+                  <small>{activity.mode === "receive" ? activity.midenTxId ?? activity.txHash : activity.destinationTxHash ?? activity.txHash}</small>
                 </div>
               </div>
 
@@ -249,7 +249,7 @@ export function ActivityDetail({ id }: { id: string }) {
                 <ReceiptLine label="Network fee" value={quote.networkFee} />
                 <ReceiptLine label="Bridge fee" value={quote.bridgeFee} />
                 <ReceiptLine label="Relayer fee" value={quote.relayerFee} />
-                {activity.depositCount ? <ReceiptLine label="AggLayer deposit" value={`#${activity.depositCount}`} /> : null}
+                {activity.depositCount ? <ReceiptLine label="AggLayer bridge event" value={`#${activity.depositCount}`} /> : null}
                 {activity.bridgeDestinationAddress ? (
                   <ReceiptLine label="Bridge destination" value={activity.bridgeDestinationAddress} />
                 ) : null}

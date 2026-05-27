@@ -68,19 +68,16 @@ the adapter is still detecting the wallet.
 When the Miden wallet opens this bridge UI, it should either provide the active
 Miden account as launch context or prompt the user to connect MidenFi first.
 
-- Receive / deposit: Miden is the destination, so the active Miden account is
+- Cross-chain Receive: Miden is the destination, so the active Miden account is
   preloaded as the destination account.
-- Send / withdraw: Miden is the source, so the active Miden account is displayed
-  as the source wallet. The destination resolves to the connected Sepolia wallet
-  or a pasted EVM address.
-- Swap: preload the Miden account on whichever side of the route is Miden.
-- Earn: preload the Miden account as the source when entering an Epoch/app
-  position from Miden, or as the destination when exiting/claiming into Miden.
+- Cross-chain Send: Miden is the source, so the active Miden account is
+  displayed as the source wallet. The destination resolves to the connected
+  Sepolia wallet or a pasted EVM address.
 
 Do not preload placeholder accounts. Address preloading must come from a
 connected wallet session or explicit launch parameters.
 
-### Deposit Into Miden
+### Cross-chain Receive
 
 1. Connect Sepolia wallet.
 2. Connect MidenFi wallet.
@@ -95,7 +92,7 @@ Bridge completion is not identical to wallet balance settlement. The Miden
 balance updates only after the wallet syncs and consumes the claim or payout
 note.
 
-### Withdraw From Miden
+### Cross-chain Send
 
 1. Connect MidenFi wallet.
 2. Connect Sepolia wallet or enter a Sepolia recipient.
@@ -105,28 +102,29 @@ note.
 5. Track provider observation, settlement, claim availability, Sepolia claim tx,
    and completion.
 
-For AggLayer, withdrawal is the slow testnet route and requires a Miden-side
-runner plus a later Sepolia `claimAsset(...)` transaction. The UI should not
-present it as one-click complete until that path exists.
+For AggLayer, Miden-to-Sepolia send is the slow testnet route and requires a
+Miden-side runner plus a later Sepolia `claimAsset(...)` transaction. The UI
+should not present it as one-click complete until that path exists.
 
-### Swap
+### Wallet Swap Boundary
 
-Swap is a provider route intent layered on top of deposit or withdraw. The UI
-must show source asset, destination asset, expected received, minimum received,
-swap fee, bridge fee, network fee, ETA, and the provider that owns execution.
-If the swap ends on Miden, completion still requires wallet sync and note
-consume when the provider creates a Miden note.
+Swap is a wallet feature, not a Bridge UI mode. Wallet Swap may call the same
+provider adapters and activity model, but the Bridge UI should remain focused on
+Cross-chain Receive and Cross-chain Send. If a wallet swap ends on Miden,
+completion still requires wallet sync and note consume when the provider creates
+a Miden note.
 
-### Epoch / Earn
+### Wallet Earn Boundary
 
-Earn is app-specific. Epoch is the current testnet route to track from
-`0xMiden/tutorials#199`. That PR adds a runnable `examples/bridging-app` using
-the Epoch protocol intent SDK for Sepolia -> Miden, Miden -> Sepolia, and Miden
-Wallet consumption of the delivered P2ID note.
+Earn is a wallet feature, not a Bridge UI mode. Epoch is the current testnet
+route to track from `0xMiden/tutorials#199`. That PR adds a runnable
+`examples/bridging-app` using the Epoch protocol intent SDK for Sepolia ->
+Miden, Miden -> Sepolia, and Miden Wallet consumption of the delivered P2ID
+note.
 
-Carry these product constraints into the bridge UI:
+Carry these product constraints into wallet Earn and Activity:
 
-- Miden -> EVM needs a reclaim height and must preserve the in-flight withdraw
+- Miden -> EVM needs a reclaim height and must preserve the in-flight send
   quote if the user switches tabs or returns later.
 - EVM -> Miden completion means the Miden wallet can consume the delivered
   P2ID note; the UI must not collapse that into generic provider success.
@@ -135,7 +133,7 @@ Carry these product constraints into the bridge UI:
 - Balance display must be BigInt-safe and route-specific decimals must come
   from the faucet/token metadata, not hardcoded display math.
 
-The UI should show whether the user is entering a position, exiting one, or
+The wallet should show whether the user is entering a position, exiting one, or
 claiming proceeds, and the activity detail should separate app status, bridge
 status, claim status, and recovery actions.
 
@@ -176,9 +174,10 @@ before adding more Miden client logic.
 ## Remaining Gaps
 
 1. Real Miden balance display from wallet/client state.
-2. Miden-side `requestTransaction(...)` for withdraw instead of mock activity
-   creation.
-3. Miden note sync and consume prompts after deposit claim-note availability.
+2. Miden-side `requestTransaction(...)` for Cross-chain Send instead of mock
+   activity creation.
+3. Miden note sync and consume prompts after Cross-chain Receive claim-note
+   availability.
 4. AggLayer Miden -> Sepolia runner and Sepolia `claimAsset(...)` handoff.
 5. Tests that mock both EVM wallet behavior and the MidenFi wallet adapter.
 6. Browser verification with MidenFi installed, including connect, reconnect,

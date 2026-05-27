@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Miden Bridge",
   description:
-    "Move value into and out of Miden with a wallet-native deposit and withdraw flow.",
+    "Move value across Sepolia and Miden with wallet-native cross-chain receive and send flows.",
   applicationName: "Miden Bridge",
   icons: {
     icon: "/favicon.ico",

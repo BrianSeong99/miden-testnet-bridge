@@ -59,7 +59,9 @@ GET  /v0/status
 
 For wallet UI and wallet chat semantics, read
 `docs/wallet-bridge-clarity.md`. User-facing language should start from
-Receive, Send, Swap, Earn, and Claim, then explain the selected provider route.
+Cross-chain Receive, Cross-chain Send, and Claim in Bridge UI contexts. Swap
+and Earn are wallet-level features, not Bridge UI modes. Then explain the
+selected provider route.
 
 For Miden wallet integration details, read
 `frontend/docs/miden-frontend-integration.md`. The monorepo Next UI uses the

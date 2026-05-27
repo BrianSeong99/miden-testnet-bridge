@@ -53,8 +53,8 @@ function providerFromParam(value: string | null): BridgeProvider | null {
 }
 
 function modeFromIntent(value: string | null): FlowMode | null {
-  if (value === "receive" || value === "deposit") return "deposit";
-  if (value === "send" || value === "withdraw") return "withdraw";
+  if (value === "receive" || value === "deposit") return "receive";
+  if (value === "send" || value === "withdraw") return "send";
   return null;
 }
 
@@ -91,7 +91,7 @@ function compactTokenAmount(value: string) {
 export function BridgeExperience() {
   const router = useRouter();
   const [provider, setProvider] = useState<BridgeProvider>("near-intents");
-  const [mode, setMode] = useState<FlowMode>("deposit");
+  const [mode, setMode] = useState<FlowMode>("receive");
   const [amount, setAmount] = useState("100");
   const [destination, setDestination] = useState("");
   const [walletConnected, setWalletConnected] = useState(false);
@@ -113,44 +113,44 @@ export function BridgeExperience() {
   const copy = modes[mode];
   const providerCopy = providers[provider];
   const quote = useMemo(() => quoteFor(mode, provider, amount), [amount, mode, provider]);
-  const isLiveAgglayerDeposit = provider === "agglayer" && mode === "deposit";
+  const isLiveAgglayerReceive = provider === "agglayer" && mode === "receive";
   const midenAddress = midenWallet.address || launchMidenAccount;
   const evmBalanceText = walletConnected ? evmBalance || "Balance unavailable" : "Not connected";
   const midenBalanceText = midenWallet.connected ? "Private assets" : launchMidenAccount ? "Launch account" : "Not connected";
-  const sourceBalance = mode === "deposit" ? evmBalanceText : midenBalanceText;
-  const destinationBalance = mode === "deposit" ? midenBalanceText : evmBalanceText;
-  const hasDestination = Boolean(destination.trim() || (mode === "deposit" ? midenAddress : walletAccount));
+  const sourceBalance = mode === "receive" ? evmBalanceText : midenBalanceText;
+  const destinationBalance = mode === "receive" ? midenBalanceText : evmBalanceText;
+  const hasDestination = Boolean(destination.trim() || (mode === "receive" ? midenAddress : walletAccount));
   const routeTone = provider === "near-intents" ? "mock" : "testnet";
   const routeNote =
     provider === "near-intents"
       ? "Mock route. Connect your own NEAR Intents backend before funded testnet runs."
       : provider === "agglayer"
-        ? mode === "deposit"
-          ? "Slow testnet route. Sepolia deposits submit through your browser wallet and use no provider bridge fee."
-          : "Slow testnet route. Withdrawals need a Miden-side runner and a Sepolia claim transaction."
+        ? mode === "receive"
+          ? "Slow testnet route. Your Sepolia wallet sends to Miden through AggLayer with no provider bridge fee."
+          : "Slow testnet route. Miden-to-Sepolia sends need a Miden-side runner and a later Sepolia claim transaction."
         : "Testnet route. Epoch integration status is tracked from activity details.";
   const primaryActionLabel = isSubmitting
     ? "Waiting for wallet"
-    : isLiveAgglayerDeposit && !walletConnected
+    : isLiveAgglayerReceive && !walletConnected
       ? "Connect Sepolia wallet"
-      : isLiveAgglayerDeposit && !hasDestination
+      : isLiveAgglayerReceive && !hasDestination
         ? "Add Miden account"
-        : isLiveAgglayerDeposit
-          ? "Deposit on Sepolia"
-          : mode === "deposit"
-            ? "Start deposit"
-            : "Start withdrawal";
-  const destinationHelp = isLiveAgglayerDeposit
+        : isLiveAgglayerReceive
+          ? "Receive on Miden"
+          : mode === "receive"
+            ? "Start receive"
+            : "Start send";
+  const destinationHelp = isLiveAgglayerReceive
     ? midenWallet.connected
       ? `Leave empty to use connected Miden wallet ${shortAddress(midenAddress)}, or paste a 30-hex account ID to override.`
       : launchMidenAccount
         ? `Preloaded from wallet launch: ${shortAddress(launchMidenAccount)}. Connect MidenFi before signing Miden-side actions.`
       : "Connect Miden wallet, or paste a 30-hex Miden account ID from the Miden CLI."
-    : mode === "withdraw" && walletConnected
+    : mode === "send" && walletConnected
       ? `Leave empty to use connected Sepolia wallet ${shortAddress(walletAccount)}, or paste another address.`
       : "Paste the destination account for this transfer.";
-  const showDestinationHelp = isLiveAgglayerDeposit || (mode === "withdraw" && walletConnected);
-  const destinationPlaceholder = isLiveAgglayerDeposit ? "Miden account ID or address" : copy.destinationPlaceholder;
+  const showDestinationHelp = isLiveAgglayerReceive || (mode === "send" && walletConnected);
+  const destinationPlaceholder = isLiveAgglayerReceive ? "Miden account ID or address" : copy.destinationPlaceholder;
   const handleMidenWalletState = useCallback((next: MidenWalletSnapshot) => setMidenWallet(next), []);
 
   useEffect(() => {
@@ -170,7 +170,7 @@ export function BridgeExperience() {
     const nextProvider = providerFromParam(params.get("provider") ?? params.get("route"));
     const nextMidenAccount = params.get("midenAccount") ?? params.get("miden_account") ?? params.get("account");
     const nextEvmAddress = params.get("evmAddress") ?? params.get("evm_address") ?? params.get("recipient");
-    const resolvedMode = nextMode ?? "deposit";
+    const resolvedMode = nextMode ?? "receive";
 
     queueMicrotask(() => {
       if (nextProvider) setProvider(nextProvider);
@@ -178,12 +178,12 @@ export function BridgeExperience() {
 
       if (nextMidenAccount) {
         setLaunchMidenAccount(nextMidenAccount);
-        if (resolvedMode === "deposit") {
+        if (resolvedMode === "receive") {
           setDestination(nextMidenAccount);
         }
       }
 
-      if (nextEvmAddress && resolvedMode === "withdraw") {
+      if (nextEvmAddress && resolvedMode === "send") {
         setDestination(nextEvmAddress);
       }
     });
@@ -279,7 +279,7 @@ export function BridgeExperience() {
 
   function selectMode(nextMode: FlowMode) {
     setMode(nextMode);
-    setAmount(nextMode === "deposit" ? "100" : "0.25");
+    setAmount(nextMode === "receive" ? "100" : "0.25");
     setDestination("");
     setBridgeError("");
   }
@@ -287,7 +287,7 @@ export function BridgeExperience() {
   function selectProvider(nextProvider: BridgeProvider) {
     setProvider(nextProvider);
     setBridgeError("");
-    if (nextProvider === "agglayer" && mode === "deposit" && !isMidenAccountHex(destination)) {
+    if (nextProvider === "agglayer" && mode === "receive" && !isMidenAccountHex(destination)) {
       setDestination("");
     }
   }
@@ -426,7 +426,7 @@ export function BridgeExperience() {
     setBridgeError("");
     setWalletError("");
 
-    if (isLiveAgglayerDeposit) {
+    if (isLiveAgglayerReceive) {
       setIsSubmitting(true);
       try {
         const ethereum = window.ethereum;
@@ -437,7 +437,7 @@ export function BridgeExperience() {
         await ensureSepolia();
         const destinationAccount = destination.trim() || midenAddress;
         if (!destinationAccount) {
-          throw new Error("Connect Miden wallet or paste a Miden account ID before depositing.");
+          throw new Error("Connect Miden wallet or paste a Miden account ID before receiving.");
         }
         const midenAccountId = normalizeMidenAccountHex(destinationAccount);
         const transaction = buildSepoliaDepositTransaction({ amountEth: amount, midenAccountId });
@@ -477,7 +477,7 @@ export function BridgeExperience() {
       return;
     }
 
-    const resolvedDestination = destination.trim() || (mode === "deposit" ? midenAddress : walletAccount);
+    const resolvedDestination = destination.trim() || (mode === "receive" ? midenAddress : walletAccount);
     const next = createActivity(mode, provider, amount, { destination: resolvedDestination });
     const updated = [next, ...activities];
     setActivities(updated);
@@ -614,7 +614,7 @@ export function BridgeExperience() {
           </div>
           {walletError ? <p className="form-error compact">{walletError}</p> : null}
 
-          <div className="mode-switch" role="group" aria-label="Bridge direction" data-active={mode}>
+          <div className="mode-switch" role="group" aria-label="Cross-chain direction" data-active={mode}>
             {(Object.keys(modes) as FlowMode[]).map((item) => (
               <button key={item} type="button" aria-pressed={item === mode} onClick={() => selectMode(item)}>
                 {modes[item].label}
@@ -722,7 +722,7 @@ export function BridgeExperience() {
           ) : (
             <div className="home-activity-empty">
               <strong>No transfers yet</strong>
-              <span>Bridge activity will appear here after your first deposit or withdrawal.</span>
+              <span>Cross-chain activity will appear here after your first receive or send.</span>
             </div>
           )}
         </section>

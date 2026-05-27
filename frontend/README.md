@@ -5,8 +5,8 @@ Next.js app for the wallet-native Miden bridge transfer flow inside the
 
 The current app is a frontend prototype with local mock quote and activity
 state plus a first AggLayer Sepolia-to-Miden testnet submit path. It models
-deposit, withdraw, route selection, claim, swap, earn, and stuck-funds recovery
-before every route is wired to backend state.
+Cross-chain Receive, Cross-chain Send, route selection, claim, and stuck-funds
+recovery before every route is wired to backend state.
 
 ## Product model
 

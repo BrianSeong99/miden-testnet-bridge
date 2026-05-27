@@ -1,6 +1,7 @@
 # AggLayer Bali Integration
 
-This UI has a first live AggLayer testnet slice for deposits from Ethereum Sepolia into Miden testnet.
+This UI has a first live AggLayer testnet slice for Cross-chain Receive from
+Ethereum Sepolia into Miden testnet.
 
 ## Supported now
 
@@ -23,14 +24,21 @@ bridge destination slot as:
 
 ## Not supported yet
 
-Withdrawals from Miden to Sepolia are not a browser-only operation yet. The current documented path uses `bridge-out-tool` from `gateway-fm/miden-agglayer`, a local Miden client store, and a later Sepolia `claimAsset` transaction. That needs a backend worker or a wallet-native Miden client integration before it should be exposed as a real one-click UI action.
+Cross-chain Send from Miden to Sepolia is not a browser-only operation yet. The
+current documented path uses `bridge-out-tool` from `gateway-fm/miden-agglayer`,
+a local Miden client store, and a later Sepolia `claimAsset` transaction. That
+needs a backend worker or a wallet-native Miden client integration before it
+should be exposed as a real one-click UI action.
 
 ## Product behavior
 
 - NEAR Intents remains a project-owned testnet mock route.
-- AggLayer deposit is the first route that can submit a real Sepolia transaction.
-- AggLayer withdraw stays visible as a testnet route, but should not claim full live support until the Miden-side runner exists.
-- Activity details poll bridge status and update the receipt once the bridge service reports a deposit for the destination.
+- AggLayer Cross-chain Receive is the first route that can submit a real
+  Sepolia transaction.
+- AggLayer Cross-chain Send stays visible as a testnet route, but should not
+  claim full live support until the Miden-side runner exists.
+- Activity details poll bridge status and update the receipt once the bridge
+  service reports a bridge event for the destination.
 
 ## Constant hygiene
 

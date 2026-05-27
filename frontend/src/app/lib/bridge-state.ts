@@ -1,5 +1,5 @@
 export type BridgeProvider = "near-intents" | "agglayer" | "epoch";
-export type FlowMode = "deposit" | "withdraw";
+export type FlowMode = "receive" | "send";
 export type ActivityStatus =
   | "signature"
   | "source_finality"
@@ -88,8 +88,8 @@ export const modes: Record<
     destinationPlaceholder: string;
   }
 > = {
-  deposit: {
-    label: "Deposit",
+  receive: {
+    label: "Receive",
     from: "Sepolia",
     to: "Miden",
     assetIn: "ETH",
@@ -97,8 +97,8 @@ export const modes: Record<
     destinationLabel: "Miden account",
     destinationPlaceholder: "mcst1... or 0x account id",
   },
-  withdraw: {
-    label: "Withdraw",
+  send: {
+    label: "Send",
     from: "Miden",
     to: "Sepolia",
     assetIn: "Miden ETH",
@@ -145,10 +145,10 @@ export const explorerUrls = {
 
 export const seedActivities: Activity[] = [
   {
-    id: "act-deposit-001",
-    mode: "deposit",
+    id: "act-receive-001",
+    mode: "receive",
     provider: "near-intents",
-    summary: "Deposit 100 ETH to Miden",
+    summary: "Receive 100 ETH on Miden",
     status: "claim_available",
     eta: "Ready now",
     amount: "100",
@@ -161,10 +161,10 @@ export const seedActivities: Activity[] = [
     updatedAt: "2 min ago",
   },
   {
-    id: "act-withdraw-002",
-    mode: "withdraw",
+    id: "act-send-002",
+    mode: "send",
     provider: "agglayer",
-    summary: "Withdraw 0.25 ETH to Sepolia",
+    summary: "Send 0.25 ETH to Sepolia",
     status: "source_finality",
     eta: "8 min",
     amount: "0.25",
@@ -176,10 +176,10 @@ export const seedActivities: Activity[] = [
     updatedAt: "12 min ago",
   },
   {
-    id: "act-deposit-003",
-    mode: "deposit",
+    id: "act-receive-003",
+    mode: "receive",
     provider: "epoch",
-    summary: "Deposit 0.4 ETH to Miden",
+    summary: "Receive 0.4 ETH on Miden",
     status: "failed",
     eta: "Needs retry",
     amount: "0.4",
@@ -207,14 +207,14 @@ export function quoteFor(mode: FlowMode, provider: BridgeProvider, amount: strin
   const relayerFee = provider === "agglayer" ? "None" : "0.03 USD";
 
   return {
-    eta: provider === "agglayer" ? (mode === "deposit" ? "About 15 min" : "30-90 min") : "3-6 min",
+    eta: provider === "agglayer" ? (mode === "receive" ? "About 15 min" : "30-90 min") : "3-6 min",
     networkFee,
     bridgeFee,
     relayerFee,
     expectedReceived: `${expected.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${modes[mode].assetOut.replace("Miden ", "")}`,
     minReceived: `${(expected * 0.995).toLocaleString(undefined, { maximumFractionDigits: 6 })} ${modes[mode].assetOut.replace("Miden ", "")}`,
-    sourceGas: mode === "deposit" ? "Sepolia ETH" : "Miden fee credit",
-    destinationGas: mode === "deposit" ? "Miden fee credit" : "Sepolia ETH",
+    sourceGas: mode === "receive" ? "Sepolia ETH" : "Miden fee credit",
+    destinationGas: mode === "receive" ? "Miden fee credit" : "Sepolia ETH",
     warning:
       provider === "near-intents"
         ? "Using a project-owned testnet mock, not the official NEAR Intents service."
@@ -256,28 +256,28 @@ export function createActivity(
 ): Activity {
   const copy = modes[mode];
   const asset = copy.assetIn.replace("Miden ", "");
-  const destination = mode === "deposit" ? "Miden" : "Sepolia";
+  const destination = mode === "receive" ? "Miden" : "Sepolia";
 
   const activity: Activity = {
     id: `act-${Date.now().toString(36)}`,
     mode,
     provider,
-    summary: `${copy.label} ${amount || "0"} ${asset} to ${destination}`,
+    summary: mode === "receive" ? `Receive ${amount || "0"} ${asset} on ${destination}` : `Send ${amount || "0"} ${asset} to ${destination}`,
     status: "signature",
     eta: provider === "agglayer" ? "8 min" : "4 min",
     amount: amount || "0",
     asset,
     txHash: "0xpreview...pending",
     sourceTxHash:
-      mode === "deposit"
+      mode === "receive"
         ? "0x9fb3f3d6b7c0e2a947a0d9b0327d6de063a08f46d8dc6f2ced343b9a7e1772ac"
         : "0x0490ad69e87c19c0c2c4b7951b87f0013c98bf5d90b7e14acbe821471ad5b91e",
     destinationTxHash:
-      mode === "withdraw"
+      mode === "send"
         ? "0x52a18acb48115396081a3d4f1e7b58e45f0ff687a3af3ff6d83b947d85cdb91e"
         : undefined,
     midenTxId:
-      mode === "deposit"
+      mode === "receive"
         ? "0x0490ad6902c47f34e8a1dc57a85b6c019a14cf27b0130d4ba6b9134fd08f72ac"
         : "0x0490ad69e87c19c0c2c4b7951b87f0013c98bf5d90b7e14acbe821471ad5b91e",
     updatedAt: "Just now",
@@ -287,7 +287,7 @@ export function createActivity(
 }
 
 export function sourceExplorer(activity: Activity) {
-  if (activity.mode === "deposit") {
+  if (activity.mode === "receive") {
     return {
       label: "View on Etherscan",
       href: `${explorerUrls.sepolia}/tx/${activity.sourceTxHash ?? activity.txHash}`,
@@ -300,7 +300,7 @@ export function sourceExplorer(activity: Activity) {
 }
 
 export function destinationExplorer(activity: Activity) {
-  if (activity.mode === "deposit") {
+  if (activity.mode === "receive") {
     return {
       label: "View on Midenscan",
       href: `${explorerUrls.miden}/txs`,
@@ -312,11 +312,18 @@ export function destinationExplorer(activity: Activity) {
   };
 }
 
+function normalizeActivity(activity: Activity): Activity {
+  const legacyMode = activity.mode as FlowMode | "deposit" | "withdraw";
+  const mode: FlowMode = legacyMode === "deposit" ? "receive" : legacyMode === "withdraw" ? "send" : legacyMode;
+  const summary = activity.summary.replace(/^Deposit\b/, "Receive").replace(/^Withdraw\b/, "Send");
+  return { ...activity, mode, summary };
+}
+
 export function loadStoredActivities() {
   const raw = window.localStorage.getItem(activityStorageKey);
   if (!raw) return seedActivities;
   const parsed = JSON.parse(raw) as Activity[];
-  return Array.isArray(parsed) && parsed.length > 0 ? parsed : seedActivities;
+  return Array.isArray(parsed) && parsed.length > 0 ? parsed.map(normalizeActivity) : seedActivities;
 }
 
 export function saveActivities(activities: Activity[]) {

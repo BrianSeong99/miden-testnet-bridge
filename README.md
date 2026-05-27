@@ -4,8 +4,9 @@ Mock **NEAR Intents 1Click** bridge between Sepolia and Miden testnet.
 
 This repo is a builder sandbox: third-party app teams can run a local mock of
 the NEAR Intents 1Click API, point their app at it, and test the same
-quote/deposit/status flow they would use against a hosted 1Click service. The
-default documented profile is public Miden testnet plus Sepolia native ETH.
+quote/source-transaction/status flow they would use against a hosted 1Click
+service. The default documented profile is public Miden testnet plus Sepolia
+native ETH.
 
 This is testnet-only infrastructure for local testing against Sepolia and public
 Miden testnet. It is not a production bridge, not a mainnet integration path,
@@ -16,8 +17,8 @@ The primary path in this repo is Sepolia native ETH plus public Miden testnet.
 ## Terminal Walkthrough
 
 The video below walks through the Sepolia path step by step: quote request,
-native ETH deposit, tx-hash submit, bridge verification, Miden claim, and the
-outbound public `BridgeOutV1` note flow.
+native ETH source transaction, tx-hash submit, bridge verification, Miden claim,
+and the public Miden `BridgeOutV1` note flow.
 
 [![Terminal walkthrough preview](docs/assets/miden-testnet-bridge-terminal-demo-poster.jpg)](docs/assets/miden-testnet-bridge-terminal-demo.mp4)
 
@@ -160,24 +161,24 @@ explicit operator action with a funded Sepolia test key.
 Wallet UI, wallet chat, and support agents should read
 [`docs/wallet-bridge-clarity.md`](docs/wallet-bridge-clarity.md) before
 answering product-level bridge questions. It maps wallet-native actions
-(`Receive from another chain`, `Send to another chain`, `Claim`) to the mock
-NEAR Intents, AggLayer, and Epoch provider routes.
+(`Cross-chain Receive`, `Cross-chain Send`, `Claim`) to the mock NEAR Intents,
+AggLayer, and Epoch provider routes.
 
 The lab UI includes a native injected-wallet connector for Sepolia wallets such
 as MetaMask or Rabby and a MidenFi wallet adapter button for Miden account
-selection. For the NEAR Intents mock flow, Sepolia deposits are sent from the
-connected browser wallet and submitted back to `/v0/deposit/submit`. Real Miden
-balance, transaction, sync, and note consume flows remain explicit SDK-backed
-work; wallet-native integration guidance lives in
+selection. For the NEAR Intents mock flow, Cross-chain Receive sends Sepolia
+funds from the connected browser wallet and submits the source tx hash back to
+`/v0/deposit/submit`. Real Miden balance, transaction, sync, and note consume
+flows remain explicit SDK-backed work; wallet-native integration guidance lives in
 [`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md).
 
 ## What This Proves
 
-- Inbound: a Sepolia native ETH deposit is verified through
+- Cross-chain Receive: a Sepolia native ETH transfer is verified through
   `/v0/deposit/submit`, then the Bridge API submits a solver-signed public P2ID
   note on Miden testnet for the recipient.
-- Outbound: a user creates a public programmable `BridgeOutV1` note on Miden
-  testnet, the bridge consumes that note, then releases Sepolia ETH.
+- Cross-chain Send: a user creates a public programmable `BridgeOutV1` note on
+  Miden testnet, the bridge consumes that note, then releases Sepolia ETH.
 - Restart recovery: quote state, tx ids, and lifecycle transitions are durable
   in Postgres.
 - Evidence logging: Sepolia runs print correlation ids, Miden tx ids, Sepolia
@@ -210,9 +211,9 @@ The mock follows the NEAR Intents 1Click lifecycle:
 
 1. Builder app fetches supported assets from `/v0/tokens`.
 2. Builder app requests a quote from `/v0/quote`.
-3. User sends the origin-chain deposit to the returned deposit address or
-   creates the returned Miden public-note deposit.
-4. For Sepolia deposits, the builder submits the landed tx hash with
+3. User sends the origin-chain transfer to the returned address or creates the
+   returned Miden public note.
+4. For Sepolia source transactions, the builder submits the landed tx hash with
    `/v0/deposit/submit`.
 5. Builder app polls `/v0/status` until `SUCCESS`, `REFUNDED`, or `FAILED`.
 
@@ -341,11 +342,11 @@ RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2>&1 | tee sepoli
 
 The runner drives both directions through the mock 1Click `/v0/*` API:
 
-- Sepolia ETH deposit -> `/v0/deposit/submit` -> Miden public P2ID mint -> user
-  claim.
-- Sepolia ETH deposit to fund the user's Miden source account -> Miden public
-  `BridgeOutV1` note from that user account -> bridge consume -> Sepolia ETH
-  release from the funded solver key.
+- Sepolia ETH source transaction -> `/v0/deposit/submit` -> Miden public P2ID
+  mint -> user claim.
+- Sepolia ETH source transaction to fund the user's Miden source account ->
+  Miden public `BridgeOutV1` note from that user account -> bridge consume ->
+  Sepolia ETH release from the funded solver key.
 
 It reads `.env`, never prints private keys, and defaults to
 `LIVE_E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/miden_bridge`
