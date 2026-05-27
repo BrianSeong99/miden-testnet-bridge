@@ -36,15 +36,18 @@ Provider names are route labels, not wallet actions:
   official NEAR Intents production service.
 - `Epoch`: testnet integration route for Epoch flows.
 
-For user-facing route selection, prefer mode labels:
+For user-facing route selection, prefer mode labels in both receive and send
+flows:
 
 | Mode | Provider behavior | Product meaning |
 | --- | --- | --- |
-| Fast | Bridge UI automatically chooses between NEAR Intents mock and Epoch based on cheapest quote, supported asset, source/destination chain coverage, and provider availability | Best default for users who want the simplest route |
+| Fast | Bridge UI automatically chooses between NEAR Intents mock and Epoch based on cheapest quote, supported asset, source/destination chain coverage, provider availability, and expected completion time | Best default for users who want the simplest route |
 | Slow | AggLayer | No provider bridge fee in the current testnet path, but slower settlement and explicit claim/gas handling |
 
-The first screen can show `Fast` and `Slow`. The details page should still expose
-the actual provider name, quote, fees, ETA, claim steps, and support diagnostics.
+The first screen can show `Fast` and `Slow`. Bridge UI owns the quote comparison
+and provider selection behind those modes. The details page should still expose
+the actual provider name, quote, fees, ETA, claim steps, and support diagnostics
+because performance and fees differ by route and direction.
 
 Current implementation boundary:
 
@@ -68,9 +71,16 @@ Expected wallet flow:
 3. Wallet opens the bridge UI with the Miden account pre-filled.
 4. User connects the source-chain wallet, such as a Sepolia wallet through
    WalletConnect, MetaMask, or another injected wallet.
-5. User chooses route/provider and amount.
-6. User reviews the quote and signs or sends on the source chain.
-7. Bridge UI tracks source confirmation, provider processing, Miden note
+5. User chooses `Fast` or `Slow` and enters amount.
+6. For `Fast`, Bridge UI auto-selects NEAR Intents mock or Epoch based on
+   cheapest quote, asset availability, chain coverage, provider availability,
+   and expected completion time.
+7. For `Slow`, Bridge UI uses AggLayer. It is the no-provider-fee route in the
+   current testnet path, but the user still needs to understand settlement time,
+   destination claim behavior, and gas requirements.
+8. User reviews the quote, route, ETA, fees, and claim steps, then signs or
+   sends on the source chain.
+9. Bridge UI tracks source confirmation, provider processing, Miden note
    creation, and Miden note claim/consume.
 
 Important state distinction:
