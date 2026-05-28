@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  allowedDevOrigins: ["127.0.0.1", "homelab.tail477b3c.ts.net"],
   async headers() {
     const securityHeaders = [
       {
