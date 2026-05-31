@@ -9,6 +9,7 @@ export const AGGLAYER_BALI = {
   nativeTokenAddress: "0x0000000000000000000000000000000000000000",
   gasLimit: BigInt(300000),
   bridgeServiceApi: "https://miden-testnet-bridge.dev.eu-north-3.gateway.fm/api",
+  monitorUrl: "https://gateway-fm.github.io/miden-agglayer/bridge-monitor/bali/",
   sepoliaExplorer: "https://sepolia.etherscan.io",
   midenExplorer: "https://testnet.midenscan.com",
   midenEthFaucetId: "mcst1arnrhfau9svl7cpu2tr8lfzzd5j87wwe",

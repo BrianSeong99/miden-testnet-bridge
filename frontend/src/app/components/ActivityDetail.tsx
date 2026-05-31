@@ -14,7 +14,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { AgglayerDepositStatus } from "../lib/agglayer";
+import { AGGLAYER_BALI, type AgglayerDepositStatus } from "../lib/agglayer";
 import {
   type Activity,
   loadStoredActivities,
@@ -41,6 +41,7 @@ export function ActivityDetail({ id }: { id: string }) {
   const modeCopy = activity ? modes[activity.mode] : null;
   const sourceLink = activity ? sourceExplorer(activity) : null;
   const destinationLink = activity ? destinationExplorer(activity) : null;
+  const agglayerMonitorLink = activity?.provider === "agglayer" ? AGGLAYER_BALI.monitorUrl : null;
   const currentIndex = activity ? timeline.findIndex((step) => step.status === activity.status) : -1;
   const needsRecovery = activity?.status === "claim_available" || activity?.status === "failed";
   const receiptTitle = activity?.mode === "send" ? "Cross-chain send receipt" : "Cross-chain receive receipt";
@@ -237,6 +238,13 @@ export function ActivityDetail({ id }: { id: string }) {
                   <a href={destinationLink.href} target="_blank" rel="noreferrer" className="explorer-link">
                     <span>Destination proof</span>
                     <strong>{destinationLink.label}</strong>
+                    <ExternalLink size={15} aria-hidden="true" />
+                  </a>
+                ) : null}
+                {agglayerMonitorLink ? (
+                  <a href={agglayerMonitorLink} target="_blank" rel="noreferrer" className="explorer-link">
+                    <span>Public monitor</span>
+                    <strong>Gateway FM Bali</strong>
                     <ExternalLink size={15} aria-hidden="true" />
                   </a>
                 ) : null}

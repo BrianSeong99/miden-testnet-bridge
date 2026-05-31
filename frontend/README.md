@@ -16,6 +16,20 @@ Miden wallet integration notes live in
 
 ## Local development
 
+For Brian's Mac Studio review flow, use the Homelab tailnet route:
+
+```text
+https://homelab.tail477b3c.ts.net:9001/
+```
+
+Health check:
+
+```text
+https://homelab.tail477b3c.ts.net:9001/health
+```
+
+Only use direct host ports when debugging outside Homelab:
+
 ```bash
 npm install
 npm run dev

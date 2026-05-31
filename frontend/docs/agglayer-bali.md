@@ -12,6 +12,8 @@ Ethereum Sepolia into Miden testnet.
 - Token: native Sepolia ETH.
 - Wallet: browser EVM wallet via `window.ethereum`.
 - Status: proxied through `/api/agglayer/deposits`, which polls Gateway FM's Miden bridge status API.
+- Public evidence: Gateway FM's Bali bridge monitor at
+  `https://gateway-fm.github.io/miden-agglayer/bridge-monitor/bali/`.
 
 The UI accepts either a Miden testnet bech32 account address, such as the
 address returned by the Miden wallet extension, or the 30-hex Miden account ID
@@ -35,10 +37,27 @@ should be exposed as a real one-click UI action.
 - NEAR Intents remains a project-owned testnet mock route.
 - AggLayer Cross-chain Receive is the first route that can submit a real
   Sepolia transaction.
+- AggLayer activity receipts link to Etherscan, Midenscan, and the Gateway FM
+  Bali monitor so the frontend can show both wallet-local state and public
+  bridge evidence.
 - AggLayer Cross-chain Send stays visible as a testnet route, but should not
   claim full live support until the Miden-side runner exists.
 - Activity details poll bridge status and update the receipt once the bridge
   service reports a bridge event for the destination.
+
+## Tailnet preview
+
+Use the Homelab route when reviewing the UI on Brian's Mac Studio:
+
+```text
+https://homelab.tail477b3c.ts.net:9001/
+```
+
+The health check is:
+
+```text
+https://homelab.tail477b3c.ts.net:9001/health
+```
 
 ## Constant hygiene
 

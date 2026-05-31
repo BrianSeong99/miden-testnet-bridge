@@ -462,8 +462,11 @@ make sandbox
 Open:
 
 ```text
-http://localhost:3000
+https://homelab.tail477b3c.ts.net:9001/
 ```
+
+Use `http://localhost:3000` only for direct host-port debugging outside the
+Homelab route.
 
 The bridge still serves the legacy static helper at `http://localhost:8080/lab`.
 
