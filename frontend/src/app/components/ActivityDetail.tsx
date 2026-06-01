@@ -13,13 +13,19 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AGGLAYER_BALI, type AgglayerClaimPlan, type AgglayerDepositStatus } from "../lib/agglayer";
+import {
+  agglayerPollMs,
+  type BridgeMonitorObservation,
+  type ChainTxObservation,
+  deriveMonitoredActivity,
+  sourceTxPollMs,
+} from "../lib/bridge-monitor";
 import {
   type Activity,
   loadStoredActivities,
   modes,
-  nextStatus,
   providers,
   quoteFor,
   saveActivities,
@@ -44,10 +50,45 @@ function optionalDepositCount(value: string | undefined) {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+function isSepoliaTxHash(value: string | undefined) {
+  return Boolean(value && /^0x[0-9a-fA-F]{64}$/.test(value));
+}
+
+function isSepoliaAddress(value: string | undefined) {
+  return Boolean(value && /^0x[0-9a-fA-F]{40}$/.test(value));
+}
+
+function matchingDeposit(status: AgglayerDepositStatus, sourceTxHash?: string) {
+  if (!sourceTxHash) return status.latestDeposit;
+  const normalized = sourceTxHash.toLowerCase();
+  return status.deposits.find((deposit) => deposit.tx_hash?.toLowerCase() === normalized) ?? null;
+}
+
+function claimPlanDepositCount(plan: AgglayerClaimPlan) {
+  const deposit = plan.deposit as
+    | {
+        depositCnt?: string | number;
+        deposit_cnt?: string | number;
+      }
+    | null;
+  return deposit?.depositCnt ?? deposit?.deposit_cnt;
+}
+
+async function fetchSepoliaTx(hash: string): Promise<ChainTxObservation> {
+  const response = await fetch(`/api/sepolia/transaction?hash=${hash}`, { cache: "no-store" });
+  const payload = (await response.json()) as ChainTxObservation | { error?: string };
+  if (!response.ok) {
+    throw new Error("error" in payload ? payload.error ?? "Unable to read Sepolia transaction." : "Unable to read Sepolia transaction.");
+  }
+  return payload as ChainTxObservation;
+}
+
 export function ActivityDetail({ id }: { id: string }) {
   const [activities, setActivities] = useState<Activity[]>(seedActivities);
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimError, setClaimError] = useState("");
+  const [monitorError, setMonitorError] = useState("");
+  const [lastChecked, setLastChecked] = useState("");
   const activity = activities.find((item) => item.id === id) ?? seedActivities.find((item) => item.id === id);
   const quote = useMemo(
     () => (activity ? quoteFor(activity.mode, activity.provider, activity.amount) : null),
@@ -59,7 +100,8 @@ export function ActivityDetail({ id }: { id: string }) {
   const agglayerMonitorLink = activity?.provider === "agglayer" ? AGGLAYER_BALI.monitorUrl : null;
   const currentIndex = activity ? timeline.findIndex((step) => step.status === activity.status) : -1;
   const needsRecovery = activity?.status === "claim_available" || activity?.status === "failed";
-  const canClaimOnSepolia = activity?.provider === "agglayer" && activity.mode === "send" && activity.status === "claim_available";
+  const canClaimOnSepolia =
+    activity?.provider === "agglayer" && activity.mode === "send" && activity.status === "claim_available" && Boolean(activity.depositCount);
   const settlement = activity ? settlementRows(activity) : [];
   const receiptTitle = activity?.mode === "send" ? "Cross-chain send receipt" : "Cross-chain receive receipt";
   const receiptAmountLabel =
@@ -85,6 +127,24 @@ export function ActivityDetail({ id }: { id: string }) {
               ? "Retry claim or export diagnostics for support."
               : "Funds are available in the destination account.";
 
+  const observeActivity = useCallback(
+    (activityId: string, observation: BridgeMonitorObservation) => {
+      setActivities((current) => {
+        const currentActivity = current.find((item) => item.id === activityId) ?? activity;
+        if (!currentActivity) return current;
+        const nextActivity = deriveMonitoredActivity(currentActivity, observation);
+        const updated = current.some((item) => item.id === activityId)
+          ? current.map((item) => (item.id === activityId ? nextActivity : item))
+          : [nextActivity, ...current];
+        saveActivities(updated);
+        setLastChecked(observation.checkedAt);
+        setMonitorError("");
+        return updated;
+      });
+    },
+    [activity],
+  );
+
   useEffect(() => {
     try {
       const stored = loadStoredActivities();
@@ -96,34 +156,32 @@ export function ActivityDetail({ id }: { id: string }) {
 
   useEffect(() => {
     if (!activity?.bridgeDestinationAddress || activity.provider !== "agglayer" || activity.mode !== "receive") return;
+    if (activity.status === "complete" || activity.status === "failed") return;
 
     let cancelled = false;
     const activityId = activity.id;
     const bridgeDestinationAddress = activity.bridgeDestinationAddress;
+    const sourceTxHash = activity.sourceTxHash;
     async function pollAgglayerStatus() {
       const response = await fetch(`/api/agglayer/deposits?destinationAddress=${bridgeDestinationAddress}`);
       if (!response.ok || cancelled) return;
       const status = (await response.json()) as AgglayerDepositStatus;
-      const latestDeposit = status.latestDeposit;
-      if (!latestDeposit) return;
+      const latestDeposit = matchingDeposit(status, sourceTxHash);
 
       setActivities((current) => {
+        const currentActivity = current.find((item) => item.id === activityId) ?? activity;
+        if (!currentActivity) return current;
+        const updatedActivity = deriveMonitoredActivity(currentActivity, {
+          checkedAt: "Just now",
+          agglayerDeposit: latestDeposit,
+        });
         const updated = current.map((item) => {
           if (item.id !== activityId) return item;
-          const readyForClaim = latestDeposit.ready_for_claim === true;
-          const status: Activity["status"] = readyForClaim ? "claim_available" : "message_observed";
-          return {
-            ...item,
-            status,
-            eta: readyForClaim ? "Ready now" : "Waiting for claim note",
-            readyForClaim,
-            depositCount: latestDeposit.deposit_cnt ? String(latestDeposit.deposit_cnt) : item.depositCount,
-            sourceTxHash: latestDeposit.tx_hash ?? item.sourceTxHash,
-            txHash: latestDeposit.tx_hash ? latestDeposit.tx_hash : item.txHash,
-            updatedAt: "Just now",
-          };
+          return updatedActivity;
         });
         saveActivities(updated);
+        setLastChecked("Just now");
+        setMonitorError("");
         return updated;
       });
     }
@@ -131,13 +189,117 @@ export function ActivityDetail({ id }: { id: string }) {
     pollAgglayerStatus().catch(() => undefined);
     const interval = window.setInterval(() => {
       pollAgglayerStatus().catch(() => undefined);
-    }, 30_000);
+    }, agglayerPollMs);
 
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activity?.bridgeDestinationAddress, activity?.id, activity?.mode, activity?.provider]);
+  }, [activity, activity?.bridgeDestinationAddress, activity?.id, activity?.mode, activity?.provider, activity?.sourceTxHash, activity?.status]);
+
+  useEffect(() => {
+    if (!activity || activity.provider !== "agglayer" || activity.mode !== "receive") return;
+    if (activity.status === "complete" || activity.status === "failed") return;
+    if (!isSepoliaTxHash(activity.sourceTxHash)) return;
+
+    let cancelled = false;
+    const activityId = activity.id;
+    const sourceHash = activity.sourceTxHash;
+
+    async function pollSourceTransaction() {
+      try {
+        const sourceTx = await fetchSepoliaTx(sourceHash!);
+        if (cancelled) return;
+        observeActivity(activityId, { checkedAt: "Just now", sourceTx });
+      } catch (error) {
+        if (!cancelled) setMonitorError(errorMessage(error));
+      }
+    }
+
+    pollSourceTransaction();
+    const interval = window.setInterval(pollSourceTransaction, sourceTxPollMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity?.id, activity?.mode, activity?.provider, activity?.sourceTxHash, activity?.status]);
+
+  useEffect(() => {
+    if (!activity || activity.provider !== "agglayer" || activity.mode !== "send") return;
+    if (activity.status === "complete" || activity.status === "failed") return;
+    if (!isSepoliaAddress(activity.destination)) return;
+    if (activity.status === "claim_submitted") return;
+    if (!activity.depositCount) return;
+
+    let cancelled = false;
+    const activityId = activity.id;
+    const destination = activity.destination;
+    const expectedDepositCount = activity.depositCount;
+
+    async function pollClaimReadiness() {
+      try {
+        const response = await fetch("/api/bridge/agglayer/l2/withdraw/claim/plan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ethAccountId: destination,
+            depositCount: optionalDepositCount(expectedDepositCount),
+          }),
+          cache: "no-store",
+        });
+        const plan = (await response.json()) as AgglayerClaimPlan | { message?: string };
+        if (!response.ok) throw new Error("message" in plan ? plan.message ?? "Unable to read claim readiness." : "Unable to read claim readiness.");
+        if (!("readyForClaim" in plan)) return;
+        if (cancelled) return;
+        observeActivity(activityId, {
+          checkedAt: "Just now",
+          claimPlan: {
+            readyForClaim: plan.readyForClaim,
+            depositCount: claimPlanDepositCount(plan),
+          },
+        });
+      } catch (error) {
+        if (!cancelled) setMonitorError(errorMessage(error));
+      }
+    }
+
+    pollClaimReadiness();
+    const interval = window.setInterval(pollClaimReadiness, agglayerPollMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity?.depositCount, activity?.destination, activity?.id, activity?.mode, activity?.provider, activity?.status]);
+
+  useEffect(() => {
+    if (!activity || activity.provider !== "agglayer" || activity.mode !== "send") return;
+    if (activity.status !== "claim_submitted") return;
+    const claimHash = activity.claimTxHash ?? activity.destinationTxHash;
+    if (!isSepoliaTxHash(claimHash)) return;
+
+    let cancelled = false;
+    const activityId = activity.id;
+
+    async function pollClaimTransaction() {
+      try {
+        const destinationTx = await fetchSepoliaTx(claimHash!);
+        if (cancelled) return;
+        observeActivity(activityId, { checkedAt: "Just now", destinationTx });
+      } catch (error) {
+        if (!cancelled) setMonitorError(errorMessage(error));
+      }
+    }
+
+    pollClaimTransaction();
+    const interval = window.setInterval(pollClaimTransaction, sourceTxPollMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity?.claimTxHash, activity?.destinationTxHash, activity?.id, activity?.mode, activity?.provider, activity?.status]);
 
   function updateActivity(nextActivity: Activity) {
     const updated = activities.some((item) => item.id === nextActivity.id)
@@ -145,11 +307,6 @@ export function ActivityDetail({ id }: { id: string }) {
       : [nextActivity, ...activities];
     setActivities(updated);
     saveActivities(updated);
-  }
-
-  function advanceActivity() {
-    if (!activity) return;
-    updateActivity({ ...activity, status: nextStatus(activity), updatedAt: "Just now" });
   }
 
   function markFailed() {
@@ -376,13 +533,25 @@ export function ActivityDetail({ id }: { id: string }) {
                 })}
               </div>
 
+              <div className="live-monitor-panel" aria-live="polite">
+                <div>
+                  <span className="status-dot active" />
+                  <strong>Live monitor</strong>
+                </div>
+                <span>
+                  {activity.provider !== "agglayer"
+                    ? "This route is not wired to a live provider monitor yet."
+                    : activity.mode === "send" && !activity.depositCount
+                      ? "Waiting for a Miden bridge event id before polling Sepolia claim proofs."
+                      : "Sepolia receipts poll every 12s. AggLayer rows and proofs poll every 30s."}
+                </span>
+                <small>{lastChecked ? `Last checked ${lastChecked}` : "Starting automatic checks"}</small>
+                {monitorError ? <p className="form-error compact">{monitorError}</p> : null}
+              </div>
+
               <div className="detail-actions">
                 <button className="secondary-button" type="button" onClick={markFailed}>
                   Mark as stuck
-                </button>
-                <button className="primary-button" type="button" onClick={advanceActivity}>
-                  Simulate next step
-                  <ArrowRight size={17} aria-hidden="true" />
                 </button>
               </div>
             </section>
@@ -434,8 +603,10 @@ export function ActivityDetail({ id }: { id: string }) {
                       ? "Settled"
                       : activity.claimTxHash
                         ? "Submitted"
-                        : activity.status === "claim_available"
+                        : activity.status === "claim_available" && (activity.mode === "receive" || activity.depositCount)
                           ? "Ready"
+                          : activity.status === "claim_available"
+                            ? "Needs bridge event id"
                           : "Not ready"
                   }
                 />
@@ -444,6 +615,8 @@ export function ActivityDetail({ id }: { id: string }) {
               <p className="recovery-copy">
                 {activity.status === "failed"
                   ? "This transfer is stuck. Retry claim, use manual claim, or export diagnostics for support."
+                  : activity.status === "claim_available" && activity.mode === "send" && !activity.depositCount
+                    ? "This send needs a specific AggLayer bridge event id before claimAsset can be submitted safely."
                   : activity.status === "claim_available"
                     ? "Funds are ready to claim on the destination side."
                     : "Recovery tools appear here when the transfer needs a user action."}
@@ -496,20 +669,20 @@ function settlementRows(activity: Activity) {
         label: "Miden claim",
         value:
           activity.status === "message_observed" || activity.status === "claim_available" || activity.status === "complete"
-            ? "Automatic"
+            ? "Bridge message available"
             : "Waiting for bridge message",
       },
       {
         label: "Note sync",
-        value: activity.status === "complete" ? "Synced" : activity.status === "claim_available" ? "Ready in wallet" : "Pending",
+        value: activity.status === "complete" ? "Synced" : activity.status === "claim_available" ? "Ready for wallet sync" : "Pending",
       },
       {
         label: "Note consume",
-        value: activity.status === "complete" ? "Consumed" : "Wallet-confirmed step",
+        value: activity.status === "complete" ? "Consumed" : "Awaiting wallet consume",
       },
       {
         label: "Claim settlement",
-        value: activity.status === "complete" ? "Balance settled" : "Waiting for wallet balance update",
+        value: activity.status === "complete" ? "Balance settled" : "Not wallet-settled",
       },
     ];
   }

@@ -1527,6 +1527,34 @@ a {
   line-height: 1.42;
 }
 
+.live-monitor-panel {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(15, 159, 110, 0.18);
+  border-radius: 16px;
+  background: var(--success-soft);
+}
+
+.live-monitor-panel > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-monitor-panel > span,
+.live-monitor-panel > small {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.live-monitor-panel > small {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+}
+
 .detail-actions,
 .recovery-actions {
   display: flex;
