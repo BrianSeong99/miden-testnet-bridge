@@ -11,7 +11,7 @@ flowchart TB
     subgraph Builder["Builder app or test agent"]
       App["App UI / script"]
       EvmWallet["Sepolia wallet"]
-      MidenWallet["Miden wallet"]
+      MidenWallet["Miden wallet / MidenFi adapter"]
     end
 
     subgraph Bridge["Mock NEAR Intents 1Click Bridge API"]
@@ -49,6 +49,12 @@ flowchart TB
     Solver --> MidenStore
     Poller --> MidenStore
 ```
+
+The monorepo Next UI uses the MidenFi wallet adapter for account connection and
+keeps pasted Miden account IDs as an explicit testnet override path. Follow the
+Miden React SDK guidance in
+[`frontend/docs/miden-frontend-integration.md`](../frontend/docs/miden-frontend-integration.md)
+before adding real Miden transaction, sync, or note consume flows.
 
 ## Inbound: Sepolia To Miden
 

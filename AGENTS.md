@@ -39,10 +39,23 @@
 
 ## Bridge Semantics
 
-- Inbound means EVM deposit to Miden payout:
+- Wallet-facing bridge guidance lives in `docs/wallet-bridge-clarity.md`. Read
+  it before changing UI copy, chat/help behavior, support docs, or route labels.
+  Bridge UI language should lead with Cross-chain Receive, Cross-chain Send, and
+  Claim. Swap and Earn are wallet-level features, not Bridge UI modes. Provider
+  names such as AggLayer, NEAR Intents, and Epoch are route labels.
+- Miden frontend and wallet-adapter guidance lives in
+  `frontend/docs/miden-frontend-integration.md`; the root
+  `docs/miden-frontend-integration.md` file is only a compatibility pointer.
+  Read the frontend doc before changing Miden account selection, Miden wallet
+  copy, note claim/consume UX, or frontend SDK dependencies.
+- The Next.js bridge UI lives in `frontend/` inside this monorepo. Do not use
+  `~/Develop/Miden/Projects/miden-bridge-ui` as the source of truth for new
+  changes.
+- Cross-chain Receive means EVM source-chain transfer to Miden payout:
   - User requests an EVM-to-Miden quote from the Bridge API.
-  - The user deposits to the returned EVM deposit address.
-  - The Bridge API detects and confirms the deposit.
+  - The user sends to the returned EVM address.
+  - The Bridge API detects and confirms the source-chain transfer.
   - The Bridge API submits a solver-signed public P2ID mint to the recipient
     account on Miden.
   - Bridge `SUCCESS` means the public P2ID payout note is committed and
@@ -57,7 +70,7 @@
   - The bridge poller consumes the note with the bridge account, then releases or
     refunds on the EVM side.
 - Public notes are intentional for the bridge design being tested here. Do not
-  redesign back to per-quote Miden deposit accounts unless the task explicitly
+  redesign back to per-quote Miden receiver accounts unless the task explicitly
   changes the product requirement.
 
 ## Agent Runbook

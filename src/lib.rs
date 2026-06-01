@@ -152,6 +152,10 @@ pub fn app(state: AppState) -> Router {
             "/agglayer/l2/withdraw/plan",
             post(api::agglayer::l2_withdraw_plan),
         )
+        .route(
+            "/agglayer/l2/withdraw/claim/plan",
+            post(api::agglayer::l2_claim_plan),
+        )
         .route("/healthz", get(api::healthz::healthz))
         .route("/readyz", get(api::healthz::readyz))
         .layer(RedactAuthorizationLayer)

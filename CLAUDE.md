@@ -57,6 +57,18 @@ POST /v0/deposit/submit
 GET  /v0/status
 ```
 
+For wallet UI and wallet chat semantics, read
+`docs/wallet-bridge-clarity.md`. User-facing language should start from
+Cross-chain Receive, Cross-chain Send, and Claim in Bridge UI contexts. Swap
+and Earn are wallet-level features, not Bridge UI modes. Then explain the
+selected provider route.
+
+For Miden wallet integration details, read
+`frontend/docs/miden-frontend-integration.md`. The monorepo Next UI uses the
+MidenFi wallet adapter for account connection and supports explicit
+wallet-launch parameters. Real Miden balance, transaction, sync, and
+claim/consume flows still require dedicated SDK-backed implementation evidence.
+
 `/demo/*` and the clickable lab UI are Sepolia testnet helpers for manual
 walkthroughs. Do not make app integrations depend on demo-only endpoints.
 

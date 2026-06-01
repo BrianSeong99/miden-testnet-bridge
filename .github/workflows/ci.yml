@@ -23,6 +23,29 @@ jobs:
       - name: cargo test
         run: cargo test --locked --lib --test evm --test hardening --test lifecycle --test miden_bridge --test miden_node --test state
 
+  frontend:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint
+        run: npm run lint
+      - name: build
+        run: npm run build
+
   e2e:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

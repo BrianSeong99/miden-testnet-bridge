@@ -1,11 +1,11 @@
 # miden-testnet-bridge
 
-Mock **NEAR Intents 1Click** bridge between Sepolia and Miden testnet.
+Testnet bridge sandbox between Sepolia and Miden testnet.
 
-This repo is a builder sandbox: third-party app teams can run a local mock of
-the NEAR Intents 1Click API, point their app at it, and test the same
-quote/deposit/status flow they would use against a hosted 1Click service. The
-default documented profile is public Miden testnet plus Sepolia native ETH.
+This repo is a builder sandbox: third-party app teams can test Miden
+cross-chain receive/send flows against public Miden testnet plus Sepolia native
+ETH. It includes a project-owned NEAR Intents-shaped mock API for compatibility,
+but the active frontend routes are AggLayer and Epoch testnet paths.
 
 This is testnet-only infrastructure for local testing against Sepolia and public
 Miden testnet. It is not a production bridge, not a mainnet integration path,
@@ -16,8 +16,8 @@ The primary path in this repo is Sepolia native ETH plus public Miden testnet.
 ## Terminal Walkthrough
 
 The video below walks through the Sepolia path step by step: quote request,
-native ETH deposit, tx-hash submit, bridge verification, Miden claim, and the
-outbound public `BridgeOutV1` note flow.
+native ETH source transaction, tx-hash submit, bridge verification, Miden claim,
+and the public Miden `BridgeOutV1` note flow.
 
 [![Terminal walkthrough preview](docs/assets/miden-testnet-bridge-terminal-demo-poster.jpg)](docs/assets/miden-testnet-bridge-terminal-demo.mp4)
 
@@ -92,20 +92,42 @@ GET  /v0/status
 walkthroughs and manual demos with funded test keys. App integrations should
 still use `/v0/*`.
 
+## Monorepo Frontend
+
+The wallet-native Next.js bridge UI now lives in [`frontend/`](frontend/). Treat
+this repository as the source of truth for both the bridge service and the UI;
+the former standalone `miden-bridge-ui` project is no longer the canonical
+working repo.
+
+Frontend product notes live in:
+
+- [`frontend/docs/product-requirements.md`](frontend/docs/product-requirements.md)
+- [`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md)
+- [`frontend/docs/agglayer-bali.md`](frontend/docs/agglayer-bali.md)
+
+The root [`docs/miden-frontend-integration.md`](docs/miden-frontend-integration.md)
+file is kept only as a compatibility pointer to the canonical frontend doc.
+
 ## AggLayer Testnet Helper
 
 The lab also exposes an AggLayer mode for the public Bali/Sepolia testnet path
 from `0xMiden/miden-client#2173`. The backend is a dry-run command planner,
-not a custody service. The frontend can hand the planned Sepolia transaction to
-an injected browser wallet only after the user reviews and confirms it.
+not a custody service. The frontend can hand planned Sepolia transactions to
+WalletConnect when `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is configured, or to
+an injected browser wallet as a local fallback, only after the user reviews and
+confirms the action.
 
 ```text
 GET  /agglayer/info
 POST /agglayer/l1/deposit/plan
 POST /agglayer/l2/withdraw/plan
+POST /agglayer/l2/withdraw/claim/plan
 ```
 
-The helper records the post-relaunch constants from the PR review notes:
+The helper records the currently configured Bali/Sepolia constants, but these
+are still pending upstream doc finalization. Treat all `AGGLAYER_*` values as
+environment overrides and recheck them against the `bali-l2-withdraw.sh` helper
+from `0xMiden/miden-client#2173` before funded withdrawals:
 
 ```text
 DEST_NETWORK=76
@@ -116,22 +138,50 @@ MIDEN_FAUCET_ID=mcst1arnrhfau9svl7cpu2tr8lfzzd5j87wwe
 
 Sepolia to Miden returns the padded bridge destination, `bridgeAsset` calldata,
 a Gateway FM status URL, and a dry-run `cast send` command. Miden to Sepolia
-returns the `bridge-out-tool` command shape and status URL; live B2AGG note
-submission and `claimAsset` remain explicit operator actions with testnet keys.
+returns the `bridge-out-tool` command shape, the correct `/bridges/{address}`
+readiness URL, a `/claims/{address}` history URL, and a `claimAsset` command
+template. The withdraw command follows the `bali-l2-withdraw.sh` helper header
+from `0xMiden/miden-client#2173`; set `MIDEN_STORE_DIR`, `MIDEN_NODE_URL`,
+`MIDEN_ACCOUNT_ID`, `MIDEN_BRIDGE_ID`, `MIDEN_FAUCET_ID`,
+`MIDEN_WITHDRAW_AMOUNT`, `ETH_ACCOUNT_ID`, and `DEST_L1_NETWORK`. Do not copy
+network IDs, account IDs, or RPC URLs from
+`gateway-fm/miden-agglayer/scripts/e2e-l2-to-l1.sh`; that script still contains
+local hardcoded values and should only be used as a `claimAsset` calldata-shape
+reference.
 
-The lab UI includes a native injected-wallet connector for Sepolia wallets
-such as MetaMask or Rabby. For the NEAR Intents mock flow, Sepolia deposits are
-sent from the connected browser wallet and submitted back to `/v0/deposit/submit`.
-For Miden, the UI accepts a testnet account ID because there is not yet a
-standard injected Miden browser wallet provider in this mock service.
+After the B2AGG note is submitted, poll `/bridges/{address}` for a Miden-origin
+row with `ready_for_claim=true`, `dest_net=0`, and an empty `claim_tx_hash`. Do
+not use `/claims/{address}` as the readiness check; it is empty until a manual
+`claimAsset` transaction lands.
+
+When a row is ready, `POST /agglayer/l2/withdraw/claim/plan` with the Sepolia
+recipient address. The helper fetches the Gateway FM merkle proof and returns a
+dry-run `cast send ... claimAsset(...)` command plus the EVM transaction object
+used by the frontend's "Claim on Sepolia" action. Broadcasting is still an
+explicit user/operator wallet action with funded Sepolia gas.
+
+Wallet UI, wallet chat, and support agents should read
+[`docs/wallet-bridge-clarity.md`](docs/wallet-bridge-clarity.md) before
+answering product-level bridge questions. It maps wallet-native actions
+(`Cross-chain Receive`, `Cross-chain Send`, `Claim`) to the mock NEAR Intents,
+AggLayer, and Epoch provider routes.
+
+The lab UI includes WalletConnect for Sepolia wallets, an injected-wallet
+fallback for local browser-extension testing, and a MidenFi wallet adapter
+button for Miden account selection. NEAR Intents is present as a disabled route
+while AggLayer and Epoch remain the active testnet routes. AggLayer Cross-chain
+Receive submits `bridgeAsset` on Sepolia and tracks Miden note sync/consume
+state in Activity. AggLayer Cross-chain Send exposes Sepolia `claimAsset` once
+the Gateway FM proof is ready. Wallet-native integration guidance lives in
+[`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md).
 
 ## What This Proves
 
-- Inbound: a Sepolia native ETH deposit is verified through
+- Cross-chain Receive: a Sepolia native ETH transfer is verified through
   `/v0/deposit/submit`, then the Bridge API submits a solver-signed public P2ID
   note on Miden testnet for the recipient.
-- Outbound: a user creates a public programmable `BridgeOutV1` note on Miden
-  testnet, the bridge consumes that note, then releases Sepolia ETH.
+- Cross-chain Send: a user creates a public programmable `BridgeOutV1` note on
+  Miden testnet, the bridge consumes that note, then releases Sepolia ETH.
 - Restart recovery: quote state, tx ids, and lifecycle transitions are durable
   in Postgres.
 - Evidence logging: Sepolia runs print correlation ids, Miden tx ids, Sepolia
@@ -164,9 +214,9 @@ The mock follows the NEAR Intents 1Click lifecycle:
 
 1. Builder app fetches supported assets from `/v0/tokens`.
 2. Builder app requests a quote from `/v0/quote`.
-3. User sends the origin-chain deposit to the returned deposit address or
-   creates the returned Miden public-note deposit.
-4. For Sepolia deposits, the builder submits the landed tx hash with
+3. User sends the origin-chain transfer to the returned address or creates the
+   returned Miden public note.
+4. For Sepolia source transactions, the builder submits the landed tx hash with
    `/v0/deposit/submit`.
 5. Builder app polls `/v0/status` until `SUCCESS`, `REFUNDED`, or `FAILED`.
 
@@ -191,7 +241,10 @@ deriving one deposit account per quote.
 - `curl` and optionally `jq`.
 - Network access to `https://rpc.testnet.miden.io`.
 - A Sepolia RPC endpoint.
-- Sepolia ETH on the test-only solver key and test-user key.
+- Sepolia ETH on the test-only solver key and test-user key. For the mock
+  NEAR Intents path, `SOLVER_PRIVATE_KEY` must hold enough Sepolia ETH for both
+  destination releases and release/refund gas; otherwise Miden -> Sepolia quotes
+  can stay in `PROCESSING` after the Miden note is consumed.
 
 No local Miden node is required for the supported path. The bridge uses
 `miden-client` network defaults for Miden testnet, including the native remote
@@ -270,6 +323,10 @@ quote.depositMemo
 a public Miden note carrying the quoted asset and memo, then the bridge poller
 consumes that note and releases Sepolia ETH.
 
+The mock service is solver-funded on the Sepolia side: the configured
+`SOLVER_PRIVATE_KEY` sends the destination release transaction. Keep that key
+pre-funded with the release amount plus Sepolia gas before running this flow.
+
 Poll:
 
 ```bash
@@ -288,11 +345,11 @@ RUSTFLAGS='-C debug-assertions=no' cargo run --bin sepolia_e2e 2>&1 | tee sepoli
 
 The runner drives both directions through the mock 1Click `/v0/*` API:
 
-- Sepolia ETH deposit -> `/v0/deposit/submit` -> Miden public P2ID mint -> user
-  claim.
-- Sepolia ETH deposit to fund the user's Miden source account -> Miden public
-  `BridgeOutV1` note from that user account -> bridge consume -> Sepolia ETH
-  release.
+- Sepolia ETH source transaction -> `/v0/deposit/submit` -> Miden public P2ID
+  mint -> user claim.
+- Sepolia ETH source transaction to fund the user's Miden source account ->
+  Miden public `BridgeOutV1` note from that user account -> bridge consume ->
+  Sepolia ETH release from the funded solver key.
 
 It reads `.env`, never prints private keys, and defaults to
 `LIVE_E2E_DATABASE_URL=postgres://postgres:postgres@localhost:5432/miden_bridge`
@@ -363,7 +420,7 @@ sequenceDiagram
 | `MIDEN_STORE_DIR` | Yes | `/var/lib/bridge/miden-store` in Compose | Persistent SQLite store plus keystore for the Rust Miden client. |
 | `EVM_RPC_URL` | Yes | `https://gateway.tenderly.co/public/sepolia` in `.env.sepolia.example` | Sepolia RPC endpoint. |
 | `MASTER_MNEMONIC` | Yes | none | Seed material for deterministic Sepolia quote wallet derivation. Use a test mnemonic only. |
-| `SOLVER_PRIVATE_KEY` | Yes | none | Funded Sepolia test key used for release and refund transactions. |
+| `SOLVER_PRIVATE_KEY` | Yes | none | Funded Sepolia test key used for release and refund transactions. For Miden -> Sepolia mock releases it must cover the destination amount plus gas. |
 | `EVM_CHAIN_ID` | No | `11155111` | Sepolia chain id. |
 | `EVM_TOKEN_ADDRESSES_PATH` | No | `/state/token-addresses.json` | Optional Sepolia ERC20 token-address file. Native ETH works without ERC20 addresses. |
 | `EVM_REQUIRED_CONFIRMATIONS` | No | `2` | Number of Sepolia confirmations required before deposit confirmation or solver release/refund completion. |
@@ -374,6 +431,7 @@ sequenceDiagram
 | `BRIDGE_UI_ENABLED` | No | `1` | Documents whether `/lab` should be treated as enabled by clients. |
 | `BRIDGE_CORS_ALLOW_ORIGIN` | No | `*` | CORS allow-origin for third-party app builders testing from a browser. |
 | `DEMO_EVM_FUNDED_PRIVATE_KEY` | Yes for `sepolia_e2e` | none | Funded Sepolia test-user key used by the live evidence runner. |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | Empty | Frontend build-time WalletConnect project id. Empty falls back to `window.ethereum` for local extension testing. |
 | `BRIDGE_PRICER` | No | CoinGecko default when unset | E2E harness sets `mock` for deterministic quotes. |
 | `RUST_LOG` | No | `info,sqlx=warn,hyper=warn,tower_http=warn` in Compose | Tracing filter. |
 | `LOG_FORMAT` | No | `json` | `json` or `pretty`. |
@@ -408,10 +466,22 @@ make sandbox
 Open:
 
 ```text
-http://localhost:3000
+https://homelab.tail477b3c.ts.net:9001/
 ```
 
+Use `http://localhost:3000` only for direct host-port debugging outside the
+Homelab route.
+
 The bridge still serves the legacy static helper at `http://localhost:8080/lab`.
+
+Frontend-only validation:
+
+```bash
+cd frontend
+npm run typecheck
+npm run lint
+npm run build
+```
 
 ## Local-Node Mode
 
@@ -443,6 +513,8 @@ make e2e-local-node
 - [`docs/builder-testing-guide.md`](docs/builder-testing-guide.md): Sepolia
   builder tutorial.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md): operator recovery procedures.
+- [`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md):
+  wallet-native Miden frontend integration notes.
 - [`docs/smoke-test-report.html`](docs/smoke-test-report.html): recorded
   Sepolia evidence page.
 - [`AGENTS.md`](AGENTS.md): canonical repo operating instructions for agents.

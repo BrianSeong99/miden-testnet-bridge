@@ -1,6 +1,8 @@
-node_modules
+.git
 .next
-.env*
-npm-debug.log*
+node_modules
+npm-debug.log
 Dockerfile
-README.md
+compose.yaml
+.DS_Store
+docs
