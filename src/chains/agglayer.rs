@@ -619,7 +619,7 @@ fn select_ready_l2_deposit(
             && deposit.network_id == miden_network_id
             && deposit.dest_net == l1_network_id
             && deposit.claim_tx_hash.trim().is_empty()
-            && deposit_count.map_or(true, |expected| deposit.deposit_cnt == expected)
+            && deposit_count.is_none_or(|expected| deposit.deposit_cnt == expected)
     })
 }
 
