@@ -14,7 +14,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { AGGLAYER_BALI, type AgglayerDepositStatus } from "../lib/agglayer";
+import { AGGLAYER_BALI, type AgglayerClaimPlan, type AgglayerDepositStatus } from "../lib/agglayer";
 import {
   type Activity,
   loadStoredActivities,
@@ -30,9 +30,24 @@ import {
   destinationExplorer,
   timeline,
 } from "../lib/bridge-state";
+import { connectEvmProvider, ensureSepolia } from "../lib/evm-wallet";
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) return String(error.message);
+  return "Something went wrong. Try again.";
+}
+
+function optionalDepositCount(value: string | undefined) {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
 
 export function ActivityDetail({ id }: { id: string }) {
   const [activities, setActivities] = useState<Activity[]>(seedActivities);
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimError, setClaimError] = useState("");
   const activity = activities.find((item) => item.id === id) ?? seedActivities.find((item) => item.id === id);
   const quote = useMemo(
     () => (activity ? quoteFor(activity.mode, activity.provider, activity.amount) : null),
@@ -44,6 +59,8 @@ export function ActivityDetail({ id }: { id: string }) {
   const agglayerMonitorLink = activity?.provider === "agglayer" ? AGGLAYER_BALI.monitorUrl : null;
   const currentIndex = activity ? timeline.findIndex((step) => step.status === activity.status) : -1;
   const needsRecovery = activity?.status === "claim_available" || activity?.status === "failed";
+  const canClaimOnSepolia = activity?.provider === "agglayer" && activity.mode === "send" && activity.status === "claim_available";
+  const settlement = activity ? settlementRows(activity) : [];
   const receiptTitle = activity?.mode === "send" ? "Cross-chain send receipt" : "Cross-chain receive receipt";
   const receiptAmountLabel =
     activity?.status === "complete"
@@ -62,6 +79,8 @@ export function ActivityDetail({ id }: { id: string }) {
           ? "Wait for the destination claim to become available."
           : activity?.status === "claim_available"
             ? "Claim funds on the destination side."
+            : activity?.status === "claim_submitted"
+              ? "Wait for the Sepolia claim transaction to confirm."
             : activity?.status === "failed"
               ? "Retry claim or export diagnostics for support."
               : "Funds are available in the destination account.";
@@ -141,6 +160,68 @@ export function ActivityDetail({ id }: { id: string }) {
   function retryClaim() {
     if (!activity) return;
     updateActivity({ ...activity, status: "message_observed", eta: "2 min", updatedAt: "Just now" });
+  }
+
+  async function claimOnSepolia() {
+    if (!activity) return;
+
+    setClaimBusy(true);
+    setClaimError("");
+    try {
+      const destinationAddress = activity.destination;
+      if (!destinationAddress || !/^0x[0-9a-fA-F]{40}$/.test(destinationAddress)) {
+        throw new Error("This activity is missing the Sepolia destination address needed to look up the claim proof.");
+      }
+
+      const { provider } = await connectEvmProvider();
+      const accounts = await provider.request<string[]>({ method: "eth_accounts" });
+      const account = accounts[0];
+      if (!account) throw new Error("Connect a Sepolia wallet to pay gas for claimAsset.");
+      await ensureSepolia(provider);
+
+      const response = await fetch("/api/bridge/agglayer/l2/withdraw/claim/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ethAccountId: destinationAddress,
+          depositCount: optionalDepositCount(activity.depositCount),
+        }),
+      });
+      const plan = (await response.json()) as AgglayerClaimPlan | { message?: string; detail?: string };
+      if (!response.ok) {
+        throw new Error("message" in plan ? plan.message ?? "Unable to build claim plan." : "Unable to build claim plan.");
+      }
+      if (!("readyForClaim" in plan) || !plan.readyForClaim || !plan.transaction) {
+        throw new Error("AggLayer proof is not ready yet. Keep this transfer in activity and try again later.");
+      }
+
+      const txHash = await provider.request<string>({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            from: account,
+            to: plan.transaction.to,
+            data: plan.transaction.data,
+            value: plan.transaction.value,
+            gas: plan.transaction.gas,
+          },
+        ],
+      });
+
+      updateActivity({
+        ...activity,
+        status: "claim_submitted",
+        eta: "Waiting for Sepolia",
+        claimTxHash: txHash,
+        destinationTxHash: txHash,
+        readyForClaim: true,
+        updatedAt: "Just now",
+      });
+    } catch (error) {
+      setClaimError(errorMessage(error));
+    } finally {
+      setClaimBusy(false);
+    }
   }
 
   function exportDiagnostic() {
@@ -308,6 +389,21 @@ export function ActivityDetail({ id }: { id: string }) {
           </div>
 
           <aside className="detail-side">
+            <section className="detail-card">
+              <div className="detail-title">
+                <div>
+                  <p className="kicker">Settlement</p>
+                  <h2>{activity.mode === "receive" ? "Miden wallet state" : "Sepolia claim state"}</h2>
+                </div>
+              </div>
+
+              <div className="metric-grid one-column settlement-grid">
+                {settlement.map((row) => (
+                  <Metric label={row.label} value={row.value} key={row.label} />
+                ))}
+              </div>
+            </section>
+
             <section className={`detail-card recovery-card ${needsRecovery ? "needs-action" : ""}`}>
               <div className="detail-title">
                 <div>
@@ -321,14 +417,28 @@ export function ActivityDetail({ id }: { id: string }) {
                 <Metric
                   label="Proof status"
                   value={
-                    activity.readyForClaim || activity.status === "claim_available"
+                    activity.readyForClaim ||
+                    activity.status === "claim_available" ||
+                    activity.status === "claim_submitted" ||
+                    activity.status === "complete"
                       ? "Ready for claim"
                       : activity.status === "message_observed"
                         ? "Observed"
                         : "Pending"
                   }
                 />
-                <Metric label="Destination claim" value={activity.status === "claim_available" ? "Ready" : "Not ready"} />
+                <Metric
+                  label="Destination claim"
+                  value={
+                    activity.status === "complete"
+                      ? "Settled"
+                      : activity.claimTxHash
+                        ? "Submitted"
+                        : activity.status === "claim_available"
+                          ? "Ready"
+                          : "Not ready"
+                  }
+                />
               </div>
 
               <p className="recovery-copy">
@@ -340,10 +450,20 @@ export function ActivityDetail({ id }: { id: string }) {
               </p>
 
               <div className="recovery-actions">
+                {canClaimOnSepolia ? (
+                  <button className="primary-button compact-action" type="button" onClick={claimOnSepolia} disabled={claimBusy}>
+                    {claimBusy ? "Waiting for wallet" : "Claim on Sepolia"}
+                  </button>
+                ) : null}
                 <button className="secondary-button" type="button" onClick={retryClaim}>
                   Retry claim
                 </button>
-                <button className="secondary-button" type="button">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={canClaimOnSepolia ? claimOnSepolia : undefined}
+                  disabled={!canClaimOnSepolia || claimBusy}
+                >
                   Manual claim
                 </button>
                 <button className="secondary-button" type="button" onClick={exportDiagnostic}>
@@ -351,6 +471,7 @@ export function ActivityDetail({ id }: { id: string }) {
                   Export
                 </button>
               </div>
+              {claimError ? <p className="form-error compact">{claimError}</p> : null}
             </section>
           </aside>
         </section>
@@ -366,6 +487,64 @@ function Metric({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function settlementRows(activity: Activity) {
+  if (activity.mode === "receive") {
+    return [
+      {
+        label: "Miden claim",
+        value:
+          activity.status === "message_observed" || activity.status === "claim_available" || activity.status === "complete"
+            ? "Automatic"
+            : "Waiting for bridge message",
+      },
+      {
+        label: "Note sync",
+        value: activity.status === "complete" ? "Synced" : activity.status === "claim_available" ? "Ready in wallet" : "Pending",
+      },
+      {
+        label: "Note consume",
+        value: activity.status === "complete" ? "Consumed" : "Wallet-confirmed step",
+      },
+      {
+        label: "Claim settlement",
+        value: activity.status === "complete" ? "Balance settled" : "Waiting for wallet balance update",
+      },
+    ];
+  }
+
+  return [
+    {
+      label: "Miden bridge note",
+      value:
+        activity.status === "source_finality" ||
+        activity.status === "message_observed" ||
+        activity.status === "claim_available" ||
+        activity.status === "claim_submitted" ||
+        activity.status === "complete"
+          ? "Submitted"
+          : "Needs wallet signature",
+    },
+    {
+      label: "Proof status",
+      value:
+        activity.readyForClaim ||
+        activity.status === "claim_available" ||
+        activity.status === "claim_submitted" ||
+        activity.status === "complete"
+          ? "Ready"
+          : "Pending",
+    },
+    {
+      label: "Sepolia claim",
+      value: activity.claimTxHash ? "Submitted" : activity.status === "claim_available" ? "Ready to submit" : "Not ready",
+    },
+    {
+      label: "Claim settlement",
+      value: activity.status === "complete" ? "Settled on Sepolia" : activity.claimTxHash ? "Waiting confirmation" : "Not started",
+    },
+  ];
 }
 
 function ReceiptLine({ label, value }: { label: string; value: string }) {

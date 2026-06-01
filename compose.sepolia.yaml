@@ -45,6 +45,8 @@ services:
   lab-ui:
     build:
       context: ./frontend
+      args:
+        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID:-}
     depends_on:
       bridge:
         condition: service_healthy

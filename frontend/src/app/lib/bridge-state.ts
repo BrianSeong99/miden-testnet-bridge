@@ -5,6 +5,7 @@ export type ActivityStatus =
   | "source_finality"
   | "message_observed"
   | "claim_available"
+  | "claim_submitted"
   | "failed"
   | "complete";
 
@@ -35,6 +36,7 @@ export type Activity = {
   sourceTxHash?: string;
   destinationTxHash?: string;
   midenTxId?: string;
+  claimTxHash?: string;
   depositCount?: string;
   readyForClaim?: boolean;
   sourceNetworkId?: number;
@@ -51,14 +53,16 @@ export const providers: Record<
     badge: string;
     route: string;
     disclosure: string;
+    disabled?: boolean;
   }
 > = {
   "near-intents": {
     label: "NEAR Intents",
-    badge: "Testnet mock",
-    route: "Mock intent solver",
+    badge: "Paused",
+    route: "Paused in this UI",
     disclosure:
-      "This is a testnet mock service for this bridge prototype. It is not an official NEAR Intents service.",
+      "NEAR Intents is intentionally disabled in this build while AggLayer and Epoch are the active testnet routes.",
+    disabled: true,
   },
   agglayer: {
     label: "AggLayer",
@@ -130,6 +134,11 @@ export const timeline: Array<{ status: ActivityStatus; label: string; detail: st
     detail: "Destination funds can be claimed or released.",
   },
   {
+    status: "claim_submitted",
+    label: "Claim submitted",
+    detail: "The destination claim transaction is waiting for confirmation.",
+  },
+  {
     status: "complete",
     label: "Complete",
     detail: "Funds are available in the destination account.",
@@ -147,7 +156,7 @@ export const seedActivities: Activity[] = [
   {
     id: "act-receive-001",
     mode: "receive",
-    provider: "near-intents",
+    provider: "agglayer",
     summary: "Receive 100 ETH on Miden",
     status: "claim_available",
     eta: "Ready now",
@@ -228,6 +237,7 @@ export function statusLabel(status: ActivityStatus) {
     source_finality: "Confirming",
     message_observed: "Message observed",
     claim_available: "Claim funds",
+    claim_submitted: "Claim submitted",
     failed: "Needs recovery",
     complete: "Complete",
   };
@@ -308,7 +318,7 @@ export function destinationExplorer(activity: Activity) {
   }
   return {
     label: "View on Etherscan",
-    href: `${explorerUrls.sepolia}/tx/${activity.destinationTxHash ?? activity.txHash}`,
+    href: `${explorerUrls.sepolia}/tx/${activity.claimTxHash ?? activity.destinationTxHash ?? activity.txHash}`,
   };
 }
 

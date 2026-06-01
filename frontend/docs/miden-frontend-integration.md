@@ -103,8 +103,9 @@ note.
    and completion.
 
 For AggLayer, Miden-to-Sepolia send is the slow testnet route and requires a
-Miden-side runner plus a later Sepolia `claimAsset(...)` transaction. The UI
-should not present it as one-click complete until that path exists.
+Miden-side runner plus a later Sepolia `claimAsset(...)` transaction. The UI can
+submit the Sepolia claim once proof is ready, but should not present the whole
+send path as one-click complete until the Miden-side request is wallet-native.
 
 ### Wallet Swap Boundary
 
@@ -173,12 +174,13 @@ before adding more Miden client logic.
 
 ## Remaining Gaps
 
-1. Real Miden balance display from wallet/client state.
+1. Rich Miden balance display by asset symbol/decimals instead of the current
+   wallet adapter asset-count summary.
 2. Miden-side `requestTransaction(...)` for Cross-chain Send instead of mock
    activity creation.
 3. Miden note sync and consume prompts after Cross-chain Receive claim-note
    availability.
-4. AggLayer Miden -> Sepolia runner and Sepolia `claimAsset(...)` handoff.
+4. AggLayer Miden -> Sepolia runner connected to wallet-created bridge notes.
 5. Tests that mock both EVM wallet behavior and the MidenFi wallet adapter.
 6. Browser verification with MidenFi installed, including connect, reconnect,
    reset, and popup-cancel recovery.

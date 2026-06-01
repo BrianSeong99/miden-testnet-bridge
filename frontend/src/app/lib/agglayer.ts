@@ -10,6 +10,7 @@ export const AGGLAYER_BALI = {
   gasLimit: BigInt(300000),
   bridgeServiceApi: "https://miden-testnet-bridge.dev.eu-north-3.gateway.fm/api",
   monitorUrl: "https://gateway-fm.github.io/miden-agglayer/bridge-monitor/bali/",
+  sepoliaRpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
   sepoliaExplorer: "https://sepolia.etherscan.io",
   midenExplorer: "https://testnet.midenscan.com",
   midenEthFaucetId: "mcst1arnrhfau9svl7cpu2tr8lfzzd5j87wwe",
@@ -46,6 +47,25 @@ export type AgglayerDepositStatus = {
   destinationAddress: string;
   deposits: AgglayerDeposit[];
   latestDeposit: AgglayerDeposit | null;
+};
+
+export type AgglayerClaimPlan = {
+  readyForClaim: boolean;
+  direction: "miden-to-sepolia";
+  bridgeAddress: string;
+  ethAccountId: string;
+  statusUrl: string;
+  claimsUrl: string;
+  merkleProofUrl: string | null;
+  deposit: AgglayerDeposit | null;
+  calldata: string | null;
+  transaction: {
+    to: string;
+    data: string;
+    value: string;
+    gas: string;
+  } | null;
+  warnings: string[];
 };
 
 export function isMidenAccountHex(value: string) {

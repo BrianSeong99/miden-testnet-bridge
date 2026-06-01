@@ -1,12 +1,11 @@
 # miden-testnet-bridge
 
-Mock **NEAR Intents 1Click** bridge between Sepolia and Miden testnet.
+Testnet bridge sandbox between Sepolia and Miden testnet.
 
-This repo is a builder sandbox: third-party app teams can run a local mock of
-the NEAR Intents 1Click API, point their app at it, and test the same
-quote/source-transaction/status flow they would use against a hosted 1Click
-service. The default documented profile is public Miden testnet plus Sepolia
-native ETH.
+This repo is a builder sandbox: third-party app teams can test Miden
+cross-chain receive/send flows against public Miden testnet plus Sepolia native
+ETH. It includes a project-owned NEAR Intents-shaped mock API for compatibility,
+but the active frontend routes are AggLayer and Epoch testnet paths.
 
 This is testnet-only infrastructure for local testing against Sepolia and public
 Miden testnet. It is not a production bridge, not a mainnet integration path,
@@ -113,8 +112,10 @@ file is kept only as a compatibility pointer to the canonical frontend doc.
 
 The lab also exposes an AggLayer mode for the public Bali/Sepolia testnet path
 from `0xMiden/miden-client#2173`. The backend is a dry-run command planner,
-not a custody service. The frontend can hand the planned Sepolia transaction to
-an injected browser wallet only after the user reviews and confirms it.
+not a custody service. The frontend can hand planned Sepolia transactions to
+WalletConnect when `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is configured, or to
+an injected browser wallet as a local fallback, only after the user reviews and
+confirms the action.
 
 ```text
 GET  /agglayer/info
@@ -155,8 +156,9 @@ not use `/claims/{address}` as the readiness check; it is empty until a manual
 
 When a row is ready, `POST /agglayer/l2/withdraw/claim/plan` with the Sepolia
 recipient address. The helper fetches the Gateway FM merkle proof and returns a
-dry-run `cast send ... claimAsset(...)` command. Broadcasting remains an
-explicit operator action with a funded Sepolia test key.
+dry-run `cast send ... claimAsset(...)` command plus the EVM transaction object
+used by the frontend's "Claim on Sepolia" action. Broadcasting is still an
+explicit user/operator wallet action with funded Sepolia gas.
 
 Wallet UI, wallet chat, and support agents should read
 [`docs/wallet-bridge-clarity.md`](docs/wallet-bridge-clarity.md) before
@@ -164,12 +166,13 @@ answering product-level bridge questions. It maps wallet-native actions
 (`Cross-chain Receive`, `Cross-chain Send`, `Claim`) to the mock NEAR Intents,
 AggLayer, and Epoch provider routes.
 
-The lab UI includes a native injected-wallet connector for Sepolia wallets such
-as MetaMask or Rabby and a MidenFi wallet adapter button for Miden account
-selection. For the NEAR Intents mock flow, Cross-chain Receive sends Sepolia
-funds from the connected browser wallet and submits the source tx hash back to
-`/v0/deposit/submit`. Real Miden balance, transaction, sync, and note consume
-flows remain explicit SDK-backed work; wallet-native integration guidance lives in
+The lab UI includes WalletConnect for Sepolia wallets, an injected-wallet
+fallback for local browser-extension testing, and a MidenFi wallet adapter
+button for Miden account selection. NEAR Intents is present as a disabled route
+while AggLayer and Epoch remain the active testnet routes. AggLayer Cross-chain
+Receive submits `bridgeAsset` on Sepolia and tracks Miden note sync/consume
+state in Activity. AggLayer Cross-chain Send exposes Sepolia `claimAsset` once
+the Gateway FM proof is ready. Wallet-native integration guidance lives in
 [`frontend/docs/miden-frontend-integration.md`](frontend/docs/miden-frontend-integration.md).
 
 ## What This Proves
@@ -428,6 +431,7 @@ sequenceDiagram
 | `BRIDGE_UI_ENABLED` | No | `1` | Documents whether `/lab` should be treated as enabled by clients. |
 | `BRIDGE_CORS_ALLOW_ORIGIN` | No | `*` | CORS allow-origin for third-party app builders testing from a browser. |
 | `DEMO_EVM_FUNDED_PRIVATE_KEY` | Yes for `sepolia_e2e` | none | Funded Sepolia test-user key used by the live evidence runner. |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | Empty | Frontend build-time WalletConnect project id. Empty falls back to `window.ethereum` for local extension testing. |
 | `BRIDGE_PRICER` | No | CoinGecko default when unset | E2E harness sets `mock` for deterministic quotes. |
 | `RUST_LOG` | No | `info,sqlx=warn,hyper=warn,tower_http=warn` in Compose | Tracing filter. |
 | `LOG_FORMAT` | No | `json` | `json` or `pretty`. |

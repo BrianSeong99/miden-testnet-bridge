@@ -10,7 +10,8 @@ Ethereum Sepolia into Miden testnet.
 - Contract: `0x1348947e282138d8f377b467f7d9c2eb0f335d1f`.
 - Destination network ID: `76`.
 - Token: native Sepolia ETH.
-- Wallet: browser EVM wallet via `window.ethereum`.
+- Wallet: WalletConnect when `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is set,
+  with `window.ethereum` as a local extension fallback.
 - Status: proxied through `/api/agglayer/deposits`, which polls Gateway FM's Miden bridge status API.
 - Public evidence: Gateway FM's Bali bridge monitor at
   `https://gateway-fm.github.io/miden-agglayer/bridge-monitor/bali/`.
@@ -24,24 +25,32 @@ bridge destination slot as:
 0x00000000<MIDEN_ACCOUNT_ID>00
 ```
 
-## Not supported yet
+## Cross-chain Send support
 
-Cross-chain Send from Miden to Sepolia is not a browser-only operation yet. The
-current documented path uses `bridge-out-tool` from `gateway-fm/miden-agglayer`,
-a local Miden client store, and a later Sepolia `claimAsset` transaction. That
-needs a backend worker or a wallet-native Miden client integration before it
-should be exposed as a real one-click UI action.
+Cross-chain Send from Miden to Sepolia still needs the Miden-side bridge note
+created by a wallet-native Miden client flow or an operator runner. Once Gateway
+FM reports the bridge row as ready, the UI can call the backend claim plan API
+and submit `claimAsset(...)` on Sepolia through the connected EVM wallet.
+
+The Activity detail page keeps these states separate:
+
+- Miden bridge note submitted.
+- Gateway FM proof ready.
+- Sepolia `claimAsset` submitted.
+- Sepolia claim settled.
 
 ## Product behavior
 
-- NEAR Intents remains a project-owned testnet mock route.
+- NEAR Intents remains visible but disabled in this UI while AggLayer and Epoch
+  are the active testnet routes.
 - AggLayer Cross-chain Receive is the first route that can submit a real
   Sepolia transaction.
 - AggLayer activity receipts link to Etherscan, Midenscan, and the Gateway FM
   Bali monitor so the frontend can show both wallet-local state and public
   bridge evidence.
-- AggLayer Cross-chain Send stays visible as a testnet route, but should not
-  claim full live support until the Miden-side runner exists.
+- AggLayer Cross-chain Send can submit the Sepolia `claimAsset` transaction once
+  proof is ready, but should not claim full one-click support until the Miden
+  side is wallet-native.
 - Activity details poll bridge status and update the receipt once the bridge
   service reports a bridge event for the destination.
 

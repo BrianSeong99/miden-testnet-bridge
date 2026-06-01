@@ -10,6 +10,9 @@ type MidenWalletSnapshot = {
   address: string;
   connected: boolean;
   error: string;
+  balanceText: string;
+  noteSyncStatus: string;
+  consumableNoteCount: number | null;
 };
 
 type MidenWalletButtonProps = {
@@ -51,11 +54,13 @@ function MidenWalletButtonInner({ onResetProvider, onStateChange }: MidenWalletB
   const [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [balanceText, setBalanceText] = useState("Not connected");
+  const [noteSyncStatus, setNoteSyncStatus] = useState("Not connected");
+  const [consumableNoteCount, setConsumableNoteCount] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const address = wallet.address ?? "";
   const readyState = wallet.wallet?.readyState;
   const ready = readyState === WalletReadyState.Installed || readyState === WalletReadyState.Loadable;
-  const balanceText = wallet.connected ? "Private assets" : "Not connected";
 
   useEffect(() => {
     if (wallet.wallet || wallet.wallets.length === 0) return;
@@ -67,8 +72,25 @@ function MidenWalletButtonInner({ onResetProvider, onStateChange }: MidenWalletB
       address,
       connected: wallet.connected,
       error,
+      balanceText,
+      noteSyncStatus,
+      consumableNoteCount,
     });
-  }, [address, error, onStateChange, wallet.connected]);
+  }, [address, balanceText, consumableNoteCount, error, noteSyncStatus, onStateChange, wallet.connected]);
+
+  useEffect(() => {
+    if (!wallet.connected) {
+      queueMicrotask(() => {
+        setBalanceText("Not connected");
+        setNoteSyncStatus("Not connected");
+        setConsumableNoteCount(null);
+      });
+      return;
+    }
+
+    void refreshWalletState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet.connected, address]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -143,6 +165,40 @@ function MidenWalletButtonInner({ onResetProvider, onStateChange }: MidenWalletB
     }
   }
 
+  async function refreshWalletState() {
+    if (!wallet.connected) return;
+
+    setError("");
+    setBalanceText("Syncing assets");
+    setNoteSyncStatus("Syncing notes");
+
+    try {
+      const assets = wallet.requestAssets ? await wallet.requestAssets() : [];
+      const assetCount = Array.isArray(assets) ? assets.length : 0;
+      const firstAsset = Array.isArray(assets) ? (assets[0] as { amount?: string | number } | undefined) : undefined;
+      setBalanceText(
+        assetCount === 0
+          ? "No wallet assets"
+          : firstAsset?.amount
+            ? `${assetCount} asset${assetCount === 1 ? "" : "s"} · ${firstAsset.amount}`
+            : `${assetCount} wallet asset${assetCount === 1 ? "" : "s"}`,
+      );
+    } catch (assetError) {
+      setBalanceText("Balance sync unavailable");
+      setError(errorMessage(assetError));
+    }
+
+    try {
+      const notes = wallet.requestConsumableNotes ? await wallet.requestConsumableNotes() : [];
+      const count = Array.isArray(notes) ? notes.length : 0;
+      setConsumableNoteCount(count);
+      setNoteSyncStatus(count > 0 ? `${count} consumable note${count === 1 ? "" : "s"}` : "No consumable notes");
+    } catch {
+      setConsumableNoteCount(null);
+      setNoteSyncStatus("Note sync unavailable");
+    }
+  }
+
   function resetMidenConnection() {
     setError("");
     try {
@@ -191,6 +247,13 @@ function MidenWalletButtonInner({ onResetProvider, onStateChange }: MidenWalletB
           </div>
           {wallet.connected ? (
             <>
+              <p className="wallet-menu-note">
+                Note sync: {noteSyncStatus}. Note consume remains wallet-confirmed.
+              </p>
+              <button type="button" role="menuitem" className="wallet-menu-item" onClick={refreshWalletState}>
+                <RefreshCcw size={15} aria-hidden="true" />
+                <span>Sync wallet state</span>
+              </button>
               <button type="button" role="menuitem" className="wallet-menu-item" onClick={reconnectMidenWallet}>
                 <RefreshCcw size={15} aria-hidden="true" />
                 <span>Reconnect wallet</span>

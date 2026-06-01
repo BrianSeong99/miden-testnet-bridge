@@ -44,6 +44,10 @@ npm run dev -- --hostname 0.0.0.0 --port 3002
 The `/api/bridge/*` proxy defaults to `http://127.0.0.1:8080` for host
 development. In Compose, `BRIDGE_API_BASE` points it at the `bridge` service.
 
+Ethereum wallet connection uses WalletConnect when
+`NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is set at build time. Leave it empty for
+local extension testing through `window.ethereum`.
+
 ## Validation
 
 ```bash
@@ -56,6 +60,7 @@ npm run build
 
 ```bash
 # from the monorepo root
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<project-id> \
 docker compose build lab-ui
 docker compose up -d lab-ui
 docker compose exec lab-ui node -e "fetch('http://127.0.0.1:3000/health').then(r => r.text()).then(console.log)"

@@ -34,17 +34,31 @@ import {
   statusTone,
   seedActivities,
 } from "../lib/bridge-state";
+import {
+  type EvmConnectionKind,
+  type EvmProvider,
+  connectEvmProvider,
+  ensureSepolia,
+  evmConnectionLabel,
+  getExistingEvmConnection,
+} from "../lib/evm-wallet";
 
 type MidenWalletSnapshot = {
   address: string;
   connected: boolean;
   error: string;
+  balanceText: string;
+  noteSyncStatus: string;
+  consumableNoteCount: number | null;
 };
 
 const emptyMidenWallet: MidenWalletSnapshot = {
   address: "",
   connected: false,
   error: "",
+  balanceText: "Not connected",
+  noteSyncStatus: "Not connected",
+  consumableNoteCount: null,
 };
 
 function providerFromParam(value: string | null): BridgeProvider | null {
@@ -90,10 +104,12 @@ function compactTokenAmount(value: string) {
 
 export function BridgeExperience() {
   const router = useRouter();
-  const [provider, setProvider] = useState<BridgeProvider>("near-intents");
+  const [provider, setProvider] = useState<BridgeProvider>("agglayer");
   const [mode, setMode] = useState<FlowMode>("receive");
   const [amount, setAmount] = useState("100");
   const [destination, setDestination] = useState("");
+  const [evmProvider, setEvmProvider] = useState<EvmProvider | null>(null);
+  const [evmConnectionKind, setEvmConnectionKind] = useState<EvmConnectionKind | "">("");
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAccount, setWalletAccount] = useState("");
   const [evmBalance, setEvmBalance] = useState("");
@@ -115,19 +131,20 @@ export function BridgeExperience() {
   const quote = useMemo(() => quoteFor(mode, provider, amount), [amount, mode, provider]);
   const isLiveAgglayerReceive = provider === "agglayer" && mode === "receive";
   const midenAddress = midenWallet.address || launchMidenAccount;
+  const evmWalletLabel = evmConnectionLabel(evmConnectionKind);
   const evmBalanceText = walletConnected ? evmBalance || "Balance unavailable" : "Not connected";
-  const midenBalanceText = midenWallet.connected ? "Private assets" : launchMidenAccount ? "Launch account" : "Not connected";
+  const midenBalanceText = midenWallet.connected ? midenWallet.balanceText : launchMidenAccount ? "Launch account" : "Not connected";
   const sourceBalance = mode === "receive" ? evmBalanceText : midenBalanceText;
   const destinationBalance = mode === "receive" ? midenBalanceText : evmBalanceText;
   const hasDestination = Boolean(destination.trim() || (mode === "receive" ? midenAddress : walletAccount));
-  const routeTone = provider === "near-intents" ? "mock" : "testnet";
+  const routeTone = providers[provider].disabled ? "disabled" : provider === "near-intents" ? "mock" : "testnet";
   const routeNote =
     provider === "near-intents"
-      ? "Mock route. Connect your own NEAR Intents backend before funded testnet runs."
+      ? "NEAR Intents is paused in this build while AggLayer and Epoch are the active testnet routes."
       : provider === "agglayer"
         ? mode === "receive"
           ? "Slow testnet route. Your Sepolia wallet sends to Miden through AggLayer with no provider bridge fee."
-          : "Slow testnet route. Miden-to-Sepolia sends need a Miden-side runner and a later Sepolia claim transaction."
+          : "Slow testnet route. Miden-side bridge note creation is tracked separately; claimAsset is submitted on Sepolia when proof is ready."
         : "Testnet route. Epoch integration status is tracked from activity details.";
   const primaryActionLabel = isSubmitting
     ? "Waiting for wallet"
@@ -173,7 +190,7 @@ export function BridgeExperience() {
     const resolvedMode = nextMode ?? "receive";
 
     queueMicrotask(() => {
-      if (nextProvider) setProvider(nextProvider);
+      if (nextProvider && !providers[nextProvider].disabled) setProvider(nextProvider);
       if (nextMode) setMode(nextMode);
 
       if (nextMidenAccount) {
@@ -233,19 +250,22 @@ export function BridgeExperience() {
   }, [routeMenuOpen]);
 
   useEffect(() => {
-    const ethereum = window.ethereum;
-    if (!ethereum) return;
-
-    ethereum
-      .request<string[]>({ method: "eth_accounts" })
-      .then((accounts) => {
+    getExistingEvmConnection()
+      .then(async (connection) => {
+        if (!connection) return;
+        const accounts = await connection.provider.request<string[]>({ method: "eth_accounts" });
         const account = accounts[0] ?? "";
+        setEvmProvider(connection.provider);
+        setEvmConnectionKind(connection.kind);
         setEvmBalance("");
         setWalletAccount(account);
         setWalletConnected(Boolean(account));
       })
       .catch(() => undefined);
+  }, []);
 
+  useEffect(() => {
+    if (!evmProvider) return;
     const handleAccounts = (...args: unknown[]) => {
       const accounts = Array.isArray(args[0]) ? (args[0] as string[]) : [];
       const account = accounts[0] ?? "";
@@ -253,10 +273,22 @@ export function BridgeExperience() {
       setWalletAccount(account);
       setWalletConnected(Boolean(account));
     };
+    const handleDisconnect = () => {
+      setEvmProvider(null);
+      setEvmConnectionKind("");
+      setEvmBalance("");
+      setWalletAccount("");
+      setWalletConnected(false);
+      setEvmMenuOpen(false);
+    };
 
-    ethereum.on?.("accountsChanged", handleAccounts);
-    return () => ethereum.removeListener?.("accountsChanged", handleAccounts);
-  }, []);
+    evmProvider.on?.("accountsChanged", handleAccounts);
+    evmProvider.on?.("disconnect", handleDisconnect);
+    return () => {
+      evmProvider.removeListener?.("accountsChanged", handleAccounts);
+      evmProvider.removeListener?.("disconnect", handleDisconnect);
+    };
+  }, [evmProvider]);
 
   useEffect(() => {
     if (!walletAccount) return;
@@ -285,6 +317,7 @@ export function BridgeExperience() {
   }
 
   function selectProvider(nextProvider: BridgeProvider) {
+    if (providers[nextProvider].disabled) return;
     setProvider(nextProvider);
     setBridgeError("");
     if (nextProvider === "agglayer" && mode === "receive" && !isMidenAccountHex(destination)) {
@@ -297,36 +330,35 @@ export function BridgeExperience() {
     setRouteMenuOpen(false);
   }
 
-  async function connectWallet() {
+  async function connectWalletSession() {
     setWalletError("");
-    const ethereum = window.ethereum;
-    if (!ethereum) {
-      setWalletError("Open this app in a browser wallet or install a wallet extension.");
-      return "";
-    }
-
-    const accounts = await ethereum.request<string[]>({ method: "eth_requestAccounts" });
+    const connection = await connectEvmProvider();
+    const accounts = await connection.provider.request<string[]>({ method: "eth_accounts" });
     const account = accounts[0] ?? "";
+    setEvmProvider(connection.provider);
+    setEvmConnectionKind(connection.kind);
     setEvmBalance("");
     setWalletAccount(account);
     setWalletConnected(Boolean(account));
-    return account;
+    return { account, provider: connection.provider };
+  }
+
+  async function connectWallet() {
+    const session = await connectWalletSession();
+    return session.account;
   }
 
   async function openWalletPermissions() {
     setWalletError("");
-    const ethereum = window.ethereum;
-    if (!ethereum) {
-      setWalletError("Open this app in a browser wallet or install a wallet extension.");
-      return;
-    }
+    const provider = evmProvider;
+    if (!provider) return;
 
     try {
-      await ethereum.request({
+      await provider.request({
         method: "wallet_requestPermissions",
         params: [{ eth_accounts: {} }],
       });
-      const accounts = await ethereum.request<string[]>({ method: "eth_accounts" });
+      const accounts = await provider.request<string[]>({ method: "eth_accounts" });
       const account = accounts[0] ?? "";
       setEvmBalance("");
       setWalletAccount(account);
@@ -364,6 +396,9 @@ export function BridgeExperience() {
   }
 
   function forgetEvmWallet() {
+    void evmProvider?.disconnect?.().catch(() => undefined);
+    setEvmProvider(null);
+    setEvmConnectionKind("");
     setEvmBalance("");
     setWalletAccount("");
     setWalletConnected(false);
@@ -372,7 +407,9 @@ export function BridgeExperience() {
 
   async function switchSepoliaFromMenu() {
     try {
-      await ensureSepolia();
+      const provider = evmProvider;
+      if (!provider) throw new Error("Connect your EVM wallet first.");
+      await ensureSepolia(provider);
       setEvmMenuOpen(false);
     } catch (error) {
       setWalletError(errorMessage(error));
@@ -392,36 +429,6 @@ export function BridgeExperience() {
     }
   }
 
-  async function ensureSepolia() {
-    const ethereum = window.ethereum;
-    if (!ethereum) throw new Error("No browser wallet found.");
-
-    const chainId = await ethereum.request<string>({ method: "eth_chainId" });
-    if (chainId === AGGLAYER_BALI.sepoliaChainHex) return;
-
-    try {
-      await ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: AGGLAYER_BALI.sepoliaChainHex }],
-      });
-    } catch (error) {
-      const code = typeof error === "object" && error && "code" in error ? Number(error.code) : 0;
-      if (code !== 4902) throw error;
-      await ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: AGGLAYER_BALI.sepoliaChainHex,
-            chainName: "Ethereum Sepolia",
-            nativeCurrency: { name: "Sepolia ETH", symbol: "ETH", decimals: 18 },
-            rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
-            blockExplorerUrls: [AGGLAYER_BALI.sepoliaExplorer],
-          },
-        ],
-      });
-    }
-  }
-
   async function submitTransfer() {
     setBridgeError("");
     setWalletError("");
@@ -429,19 +436,23 @@ export function BridgeExperience() {
     if (isLiveAgglayerReceive) {
       setIsSubmitting(true);
       try {
-        const ethereum = window.ethereum;
-        if (!ethereum) throw new Error("Open this app in a browser wallet or install a wallet extension.");
-        const account = walletAccount || (await connectWallet());
+        let activeProvider = evmProvider;
+        let account = walletAccount;
+        if (!activeProvider || !account) {
+          const session = await connectWalletSession();
+          activeProvider = session.provider;
+          account = session.account;
+        }
         if (!account) return;
 
-        await ensureSepolia();
+        await ensureSepolia(activeProvider);
         const destinationAccount = destination.trim() || midenAddress;
         if (!destinationAccount) {
           throw new Error("Connect Miden wallet or paste a Miden account ID before receiving.");
         }
         const midenAccountId = normalizeMidenAccountHex(destinationAccount);
         const transaction = buildSepoliaDepositTransaction({ amountEth: amount, midenAccountId });
-        const txHash = await ethereum.request<string>({
+        const txHash = await activeProvider.request<string>({
           method: "eth_sendTransaction",
           params: [
             {
@@ -508,7 +519,7 @@ export function BridgeExperience() {
               <span className="wallet-copy">
                 <small>
                   <span className={`wallet-status-dot ${walletConnected ? "connected" : ""}`} />
-                  Sepolia
+                  {evmWalletLabel}
                 </small>
                 <span>{walletConnected ? shortAddress(walletAccount) : "Connect wallet"}</span>
               </span>
@@ -523,7 +534,7 @@ export function BridgeExperience() {
                     <Wallet size={16} aria-hidden="true" />
                   </span>
                   <span>
-                    <strong>Sepolia wallet</strong>
+                    <strong>{evmWalletLabel}</strong>
                     <small>
                       {shortAddress(walletAccount)} · {evmBalanceText}
                     </small>
@@ -587,12 +598,15 @@ export function BridgeExperience() {
                   {(Object.keys(providers) as BridgeProvider[]).map((key) => {
                     const option = providers[key];
                     const selected = key === provider;
+                    const disabled = option.disabled === true;
                     return (
                       <button
-                        className={`route-option ${selected ? "selected" : ""}`}
+                        className={`route-option ${selected ? "selected" : ""} ${disabled ? "disabled" : ""}`}
                         type="button"
                         role="option"
                         aria-selected={selected}
+                        aria-disabled={disabled}
+                        disabled={disabled}
                         key={key}
                         onClick={() => selectRouteOption(key)}
                       >
@@ -665,6 +679,22 @@ export function BridgeExperience() {
             />
             {showDestinationHelp ? <small>{destinationHelp}</small> : null}
           </label>
+          {midenWallet.connected ? (
+            <div className="wallet-state-strip" aria-label="Miden wallet state">
+              <span>
+                <strong>Miden balance</strong>
+                {midenWallet.balanceText}
+              </span>
+              <span>
+                <strong>Note sync</strong>
+                {midenWallet.noteSyncStatus}
+              </span>
+              <span>
+                <strong>Consumable</strong>
+                {midenWallet.consumableNoteCount ?? "Unknown"}
+              </span>
+            </div>
+          ) : null}
           {bridgeError ? <p className="form-error">{bridgeError}</p> : null}
 
           <div className="quote-summary" aria-label="Route quote">

@@ -1,7 +1,7 @@
 use std::{env, str::FromStr};
 
 use alloy::{
-    primitives::{Address, Bytes, U256},
+    primitives::{Address, B256, Bytes, U256},
     sol,
     sol_types::SolCall,
 };
@@ -42,6 +42,7 @@ pub const CLAIM_ASSET_SIGNATURE: &str = "claimAsset(bytes32[32],bytes32[32],uint
 
 sol! {
     function bridgeAsset(uint32 destinationNetwork, address destinationAddress, uint256 amount, address token, bool forceUpdateGlobalExitRoot, bytes permitData);
+    function claimAsset(bytes32[32] smtProofLocalExitRoot, bytes32[32] smtProofRollupExitRoot, uint256 globalIndex, bytes32 mainnetExitRoot, bytes32 rollupExitRoot, uint32 originNetwork, address originTokenAddress, uint32 destinationNetwork, address destinationAddress, uint256 amount, bytes metadata);
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -142,6 +143,7 @@ pub struct AgglayerL2WithdrawPlan {
 #[serde(rename_all = "camelCase")]
 pub struct AgglayerL2ClaimPlanRequest {
     pub eth_account_id: String,
+    pub deposit_count: Option<u64>,
     pub eth_keystore: Option<String>,
     pub sepolia_rpc_url: Option<String>,
 }
@@ -157,9 +159,20 @@ pub struct AgglayerL2ClaimPlan {
     pub claims_url: String,
     pub merkle_proof_url: Option<String>,
     pub deposit: Option<AgglayerBridgeDeposit>,
+    pub calldata: Option<String>,
+    pub transaction: Option<AgglayerEvmTransaction>,
     pub command: Vec<String>,
     pub shell_command: Option<String>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgglayerEvmTransaction {
+    pub to: String,
+    pub data: String,
+    pub value: String,
+    pub gas: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -444,9 +457,19 @@ pub async fn build_l2_claim_plan(
     let claims = claims_url(&config, &request.eth_account_id);
     let deposits = fetch_bridge_deposits(&status_url).await?;
 
-    let Some(deposit) =
-        select_ready_l2_deposit(&deposits, config.dest_network, config.dest_l1_network).cloned()
-    else {
+    let Some(deposit) = select_ready_l2_deposit(
+        &deposits,
+        config.dest_network,
+        config.dest_l1_network,
+        request.deposit_count,
+    )
+    .cloned() else {
+        let missing = request
+            .deposit_count
+            .map(|deposit_count| {
+                format!("No ready unclaimed Miden-origin bridge row was found for deposit count {deposit_count}.")
+            })
+            .unwrap_or_else(|| "No ready unclaimed Miden-origin bridge row was found yet.".to_owned());
         return Ok(AgglayerL2ClaimPlan {
             ready_for_claim: false,
             direction: "miden-to-sepolia",
@@ -456,10 +479,12 @@ pub async fn build_l2_claim_plan(
             claims_url: claims,
             merkle_proof_url: None,
             deposit: None,
+            calldata: None,
+            transaction: None,
             command: Vec::new(),
             shell_command: None,
             warnings: vec![
-                "No ready unclaimed Miden-origin bridge row was found yet.".to_owned(),
+                missing,
                 "Keep polling the bridges URL; polling the claims URL before claimAsset will return empty history.".to_owned(),
             ],
         });
@@ -474,6 +499,8 @@ pub async fn build_l2_claim_plan(
         .eth_keystore
         .unwrap_or_else(|| "<sepolia-claimer-keystore>".to_owned());
     let command = l2_claim_command(&config, &deposit, &proof, &sepolia_rpc_url, &eth_keystore);
+    let calldata = claim_asset_calldata(&deposit, &proof)?;
+    let transaction = l2_claim_transaction(&config, calldata.clone());
 
     Ok(AgglayerL2ClaimPlan {
         ready_for_claim: true,
@@ -484,6 +511,8 @@ pub async fn build_l2_claim_plan(
         claims_url: claims,
         merkle_proof_url: Some(merkle_proof_url),
         deposit: Some(deposit),
+        calldata: Some(calldata),
+        transaction: Some(transaction),
         shell_command: Some(shell_join(&command)),
         command,
         warnings: vec![
@@ -583,12 +612,14 @@ fn select_ready_l2_deposit(
     deposits: &[AgglayerBridgeDeposit],
     miden_network_id: u32,
     l1_network_id: u32,
+    deposit_count: Option<u64>,
 ) -> Option<&AgglayerBridgeDeposit> {
     deposits.iter().find(|deposit| {
         deposit.ready_for_claim
             && deposit.network_id == miden_network_id
             && deposit.dest_net == l1_network_id
             && deposit.claim_tx_hash.trim().is_empty()
+            && deposit_count.map_or(true, |expected| deposit.deposit_cnt == expected)
     })
 }
 
@@ -620,6 +651,48 @@ fn l2_claim_command(
         "--rpc-url".to_owned(),
         sepolia_rpc_url.to_owned(),
     ]
+}
+
+fn claim_asset_calldata(
+    deposit: &AgglayerBridgeDeposit,
+    proof: &BridgeProofData,
+) -> Result<String> {
+    let origin_token_address = Address::from_str(&deposit.orig_addr)
+        .context("origin token address must be an EVM address")?;
+    let destination_address = Address::from_str(&deposit.dest_addr)
+        .context("destination address must be an EVM address")?;
+    let global_index =
+        U256::from_str(&deposit.global_index).context("global index must be a uint256")?;
+    let amount = U256::from_str(&deposit.amount).context("amount must be a uint256")?;
+    let main_exit_root =
+        B256::from_str(&proof.main_exit_root).context("main exit root must be bytes32")?;
+    let rollup_exit_root =
+        B256::from_str(&proof.rollup_exit_root).context("rollup exit root must be bytes32")?;
+    let metadata = parse_hex_bytes(&normalized_metadata(&deposit.metadata))?;
+
+    let call = claimAssetCall::new((
+        fixed_b256_array(&proof.merkle_proof)?,
+        fixed_b256_array(&proof.rollup_merkle_proof)?,
+        global_index,
+        main_exit_root,
+        rollup_exit_root,
+        deposit.orig_net,
+        origin_token_address,
+        deposit.dest_net,
+        destination_address,
+        amount,
+        metadata,
+    ));
+    Ok(format!("0x{}", alloy::hex::encode(call.abi_encode())))
+}
+
+fn l2_claim_transaction(config: &AgglayerConfig, calldata: String) -> AgglayerEvmTransaction {
+    AgglayerEvmTransaction {
+        to: config.bridge_address.clone(),
+        data: calldata,
+        value: "0x0".to_owned(),
+        gas: format!("0x{:x}", config.gas_limit),
+    }
 }
 
 fn l2_claim_command_template(config: &AgglayerConfig) -> String {
@@ -659,6 +732,14 @@ fn fixed_bytes32_array(values: &[String]) -> String {
     )
 }
 
+fn fixed_b256_array(values: &[String]) -> Result<[B256; 32]> {
+    let mut padded = [B256::ZERO; 32];
+    for (index, value) in values.iter().take(32).enumerate() {
+        padded[index] = B256::from_str(value).context("proof element must be bytes32")?;
+    }
+    Ok(padded)
+}
+
 fn normalized_metadata(metadata: &str) -> String {
     let trimmed = metadata.trim();
     if trimmed.is_empty() || trimmed == "0x" {
@@ -666,6 +747,17 @@ fn normalized_metadata(metadata: &str) -> String {
     } else {
         trimmed.to_owned()
     }
+}
+
+fn parse_hex_bytes(value: &str) -> Result<Bytes> {
+    let raw = value
+        .strip_prefix("0x")
+        .ok_or_else(|| anyhow!("metadata must be 0x-prefixed hex"))?;
+    ensure!(
+        raw.len() % 2 == 0 && raw.chars().all(|ch| ch.is_ascii_hexdigit()),
+        "metadata must be valid hex"
+    );
+    Ok(Bytes::from(alloy::hex::decode(raw)?))
 }
 
 fn bridge_status_url(config: &AgglayerConfig, eth_account_id: &str) -> String {
@@ -984,9 +1076,14 @@ mod tests {
             },
         ];
 
-        let selected = select_ready_l2_deposit(&deposits, 76, 0).expect("ready deposit");
+        let selected = select_ready_l2_deposit(&deposits, 76, 0, None).expect("ready deposit");
         assert_eq!(selected.deposit_cnt, 2);
         assert_eq!(selected.tx_hash, "0xready");
+
+        let filtered =
+            select_ready_l2_deposit(&deposits, 76, 0, Some(2)).expect("filtered deposit");
+        assert_eq!(filtered.tx_hash, "0xready");
+        assert!(select_ready_l2_deposit(&deposits, 76, 0, Some(3)).is_none());
     }
 
     #[test]
@@ -1030,6 +1127,43 @@ mod tests {
         assert!(shell.contains("--rpc-url https://ethereum-sepolia-rpc.publicnode.com"));
         assert!(shell.contains("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"));
         assert!(shell.contains(" 0x "));
+    }
+
+    #[test]
+    fn claim_transaction_uses_bridge_service_deposit_and_proof() {
+        let config = test_config();
+        let deposit = AgglayerBridgeDeposit {
+            leaf_type: Some(1),
+            orig_net: 76,
+            orig_addr: "0x0000000000000000000000000000000000000000".to_owned(),
+            amount: "10000".to_owned(),
+            dest_net: 0,
+            dest_addr: "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc".to_owned(),
+            block_num: "2".to_owned(),
+            deposit_cnt: 2,
+            network_id: 76,
+            tx_hash: "0xready".to_owned(),
+            claim_tx_hash: String::new(),
+            metadata: "0x1234".to_owned(),
+            ready_for_claim: true,
+            global_index: "18446744073709551618".to_owned(),
+        };
+        let proof = BridgeProofData {
+            main_exit_root: format!("0x{}", "11".repeat(32)),
+            rollup_exit_root: format!("0x{}", "22".repeat(32)),
+            merkle_proof: vec![format!("0x{}", "33".repeat(32))],
+            rollup_merkle_proof: vec![format!("0x{}", "44".repeat(32))],
+        };
+
+        let calldata = claim_asset_calldata(&deposit, &proof).expect("claim calldata");
+        let transaction = l2_claim_transaction(&config, calldata.clone());
+
+        assert!(calldata.starts_with("0x"));
+        assert_ne!(calldata, "0x");
+        assert_eq!(transaction.to, config.bridge_address);
+        assert_eq!(transaction.data, calldata);
+        assert_eq!(transaction.value, "0x0");
+        assert_eq!(transaction.gas, format!("0x{:x}", config.gas_limit));
     }
 
     #[test]
